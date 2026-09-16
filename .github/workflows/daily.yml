@@ -1,0 +1,48 @@
+name: daily-fetch
+
+on:
+  schedule:
+    - cron: "0 21 * * *"   # 毎朝 6:00（日本時間）
+  workflow_dispatch:        # Actions 画面から手動でも実行できる
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 相場を取得
+        run: |
+          if [ -z "$EBAY_CLIENT_ID" ] || [ -z "$EBAY_CLIENT_SECRET" ]; then
+            echo "::warning::eBay の API キーが未登録なので取得を省きました（README の手順 3）"
+            exit 0
+          fi
+          python3 scripts/fetch.py
+        env:
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
+          RAKUTEN_ACCESS_KEY: ${{ secrets.RAKUTEN_ACCESS_KEY }}
+          RAKUTEN_REFERER: ${{ secrets.RAKUTEN_REFERER }}
+          YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+          ETSY_API_KEY: ${{ secrets.ETSY_API_KEY }}
+
+      - name: 結果を保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add docs/data data
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "data: $(TZ=Asia/Tokyo date +%F)"
+            git push
+          fi
