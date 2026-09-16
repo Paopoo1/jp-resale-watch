@@ -63,8 +63,19 @@ for p in cfg["products"]:
         "etsy": None, "errors": [],
     })
 
-discovery, hist_genres = {}, {}
+ETSY_TITLES = {
+    "camera": ["Vintage Olympus Pen EE-3 Half Frame Camera, Tested", "Vintage Canon Canonet QL17 GIII Rangefinder"],
+    "craft": ["Vintage Kokeshi Doll, Signed, Naruko", "Japanese Pottery Sake Cup Set, Bizen Ware", "Wajima Lacquer Tray - Maki-e Crane"],
+    "hobby": ["Vintage Japanese Tin Toy Robot 1960s", "Vintage Anime Cel Sailor Moon"],
+    "fashion": ["Vintage Kimono Silk Haori Jacket, Black Crane Pattern", "Silk Obi Belt Gold Brocade, Japanese Vintage", "Vintage Yukata Cotton Indigo"],
+}
+
+discovery, etsy_discovery, hist_genres = {}, {}, {}
 for g in cfg["genres"]:
+    etsy_discovery[g["id"]] = sorted([
+        {"t": f"[デモ] {t}", "p": round(rng.uniform(25, 300), 2), "qty": rng.randint(1, 6), "fav": rng.randint(3, 900),
+         "s1": rng.choice([0, 0, 0, 1, 2]), "u": f"https://www.etsy.com/search?q={t}", "q": g["etsy_discovery"][0]["q"]}
+        for t in ETSY_TITLES[g["id"]]], key=lambda x: (-x["s1"], -x["fav"]))
     discovery[g["id"]] = sorted([
         {"t": f"[デモ] {t}", "p": round(rng.uniform(40, 600), 2), "s": rng.randint(1, 40), "s1": rng.choice([0, 0, 1, 2, 3]),
          "u": f"https://www.ebay.com/sch/i.html?_nkw={t}", "i": None, "q": g["discovery"][0]["q"]}
@@ -72,7 +83,8 @@ for g in cfg["genres"]:
     hist_genres[g["id"]] = [
         {"d": (today - timedelta(days=DAYS - 1 - i)).isoformat(),
          "s1": max(0, int(rng.gauss(9, 4))) if i else 0, "v1": max(0, int(rng.gauss(5, 3))) if i else 0,
-         "n": rng.randint(150, 260)} for i in range(DAYS)]
+         "n": rng.randint(150, 260), "es1": max(0, int(rng.gauss(3, 2))) if i else 0,
+         "ev1": max(0, int(rng.gauss(2, 1))) if i else 0, "en": rng.randint(120, 250)} for i in range(DAYS)]
 
 fx_rows = [{"d": (today - timedelta(days=DAYS - 1 - i)).isoformat(), "v": round(fx + rng.uniform(-3, 3), 2)}
            for i in range(DAYS)]
@@ -84,8 +96,8 @@ out.mkdir(parents=True, exist_ok=True)
     "generated_at": datetime.now(JST).isoformat(timespec="minutes"), "date": today.isoformat(), "demo": True,
     "fx": {"usdjpy": fx, "source": "demo"}, "settings": cfg["settings"],
     "genres": [{"id": g["id"], "name": g["name"]} for g in cfg["genres"]],
-    "sources": {"ebay": True, "rakuten": True, "yahoo": True, "etsy": False},
-    "products": products, "discovery": discovery, "api_calls": {"ebay": 0},
+    "sources": {"ebay": True, "rakuten": True, "yahoo": True, "etsy": True},
+    "products": products, "discovery": discovery, "etsy_discovery": etsy_discovery, "api_calls": {"ebay": 0, "etsy": 0},
 }, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
 (out / "history.json").write_text(json.dumps({
     "demo": True, "start": fx_rows[0]["d"], "products": hist_products, "genres": hist_genres, "fx": fx_rows,

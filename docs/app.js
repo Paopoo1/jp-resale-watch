@@ -16,6 +16,7 @@ const app = {
   genre: store.get('genre') || 'all',
   sort: store.get('sort') || 'profit',
   onlyProfit: store.get('onlyProfit') !== 'false',
+  hotSource: store.get('hotSource') || 'ebay',
   showAll: false,
   settings: null,
   charts: [],       // 画面のグラフ（リサイズ時に描き直す）
@@ -124,31 +125,51 @@ function calc(p) {
   return r;
 }
 
-function checkLinks(qEn, qJa) {
-  const links = [];
-  if (qEn) links.push(['eBay', '売れた出品', `https://www.ebay.com/sch/i.html?_nkw=${enc(qEn)}&LH_Sold=1&LH_Complete=1`]);
-  if (qJa) {
-    links.push(['メルカリ', '売り切れ', `https://jp.mercari.com/search?keyword=${enc(qJa)}&status=sold_out`]);
-    links.push(['ヤフオク', '落札相場', `https://auctions.yahoo.co.jp/closedsearch/closedsearch?p=${enc(qJa)}`]);
-    links.push(['楽天市場', '安い順', `https://search.rakuten.co.jp/search/mall/${enc(qJa)}/?s=2`]);
-    links.push(['Yahoo!ショッピング', '安い順', `https://shopping.yahoo.co.jp/search?p=${enc(qJa)}&X=2`]);
-  }
-  if (qEn) links.push(['Etsy', '出品中', `https://www.etsy.com/search?q=${enc(qEn)}`]);
-  return links;
-}
+/** 日本で今買える出品（どれも「販売中・安い順」で開く）。 */
+const buyLinks = (q) => [
+  { short: 'メルカリ', name: 'メルカリ', sub: '販売中・安い順', url: `https://jp.mercari.com/search?keyword=${enc(q)}&status=on_sale&sort=price&order=asc` },
+  { short: 'ヤフオク', name: 'ヤフオク', sub: '出品中・安い順', url: `https://auctions.yahoo.co.jp/search/search?p=${enc(q)}&s1=cbids&o1=a` },
+  { short: 'ラクマ', name: 'ラクマ', sub: '販売中・安い順', url: `https://fril.jp/s?query=${enc(q)}&transaction=selling&sort=sell_price&order=asc` },
+  { short: 'Yフリマ', name: 'Yahoo!フリマ', sub: '販売中・安い順', url: `https://paypayfleamarket.yahoo.co.jp/search/${enc(q)}?open=1&sort=price&order=asc` },
+];
 
-/** 英語の出品タイトルから、日本のサイトで探しやすい語だけを残す。 */
-function searchWords(title) {
-  return title
+/** 売れた価格を確かめるページ。 */
+const soldLinks = (qEn, qJa) => [
+  { short: 'メルカリ売切', name: 'メルカリ', sub: '売り切れ', url: `https://jp.mercari.com/search?keyword=${enc(qJa)}&status=sold_out` },
+  { short: 'ヤフオク落札', name: 'ヤフオク', sub: '落札相場', url: `https://auctions.yahoo.co.jp/closedsearch/closedsearch?p=${enc(qJa)}` },
+  { short: 'eBay落札', name: 'eBay', sub: '売れた出品', url: `https://www.ebay.com/sch/i.html?_nkw=${enc(qEn)}&LH_Sold=1&LH_Complete=1` },
+  { short: 'Etsy', name: 'Etsy', sub: '出品中', url: `https://www.etsy.com/search?q=${enc(qEn)}` },
+];
+
+const linkButtons = (links) => links.map((l) => `<a class="link" href="${esc(l.url)}" title="${esc(l.name)}（${esc(l.sub)}）" target="_blank" rel="noopener">${esc(l.short)}</a>`).join('');
+const gridLink = (l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)}<span>${esc(l.sub)}</span></a>`;
+const linkRow = (label, links) => `<div class="links"><span class="links-label">${label}</span>${linkButtons(links)}</div>`;
+
+// 英語のタイトルを日本のサイトで探しやすい言葉に置き換える
+const JA_WORDS = [
+  [/\bsake cups?\b|\bguinomi\b/gi, 'ぐい呑み'], [/\btea bowl\b|\bchawan\b/gi, '茶碗'], [/\bfilm camera\b/gi, 'フィルムカメラ'],
+  [/\bcast iron kettle\b|\btetsubin\b/gi, '鉄瓶'], [/\bkimono\b/gi, '着物'], [/\bhaori\b/gi, '羽織'], [/\bobi\b/gi, '帯'],
+  [/\byukata\b/gi, '浴衣'], [/\bkokeshi\b/gi, 'こけし'], [/\bkyusu\b|\bteapot\b/gi, '急須'], [/\bfuroshiki\b/gi, '風呂敷'],
+  [/\btenugui\b/gi, '手ぬぐい'], [/\bnetsuke\b/gi, '根付'], [/\blacquer(ware)?\b|\burushi\b/gi, '漆器'],
+  [/\bpottery\b|\bceramics?\b/gi, '陶器'], [/\bporcelain\b/gi, '磁器'], [/\bimari\b/gi, '伊万里'], [/\barita\b/gi, '有田焼'],
+  [/\bkutani\b/gi, '九谷焼'], [/\bbizen\b/gi, '備前焼'], [/\bhagi\b/gi, '萩焼'], [/\bmashiko\b/gi, '益子焼'],
+  [/\bkitchen knife\b|\bknife\b/gi, '包丁'], [/\bfigure\b/gi, 'フィギュア'], [/\bsilk\b/gi, '正絹'],
+];
+const NOISE = /\b(from japan|made in japan|japanese|japan|jpn|jp|jdm|vintage|antique|authentic|handmade|traditional|exc|excellent|near|mint|n mint|nm|tested|working|very good|good|rare|f\/s|free shipping|fast shipping|w\/|with|new|used|condition|boxed|w box|top|gift|for (him|her)|women'?s|men'?s|and|the|of|for|a)\b/gi;
+
+function jaQuery(title, translate = true) {
+  let s = String(title || '').split(/,|\s[-–|]\s|\s\/\s/)[0]
     .replace(/\[[^\]]*\]|\([^)]*\)|【[^】]*】|「[^」]*」/g, ' ')
-    .replace(/#\d+/g, ' ')
-    .replace(/\b(from japan|japan|jpn|jp|jdm|exc|excellent|near|mint|n mint|tested|working|very good|good|rare|vintage|f\/s|free shipping|fast shipping|w\/|with|new|used|condition|boxed|w box|nm|top)\b/gi, ' ')
-    .replace(/[★☆◆◇●○♪!！|+*]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .slice(0, 5)
-    .join(' ');
+    .replace(/#\d+/g, ' ');
+  if (translate) for (const [re, ja] of JA_WORDS) s = s.replace(re, ` ${ja} `);
+  s = s.replace(NOISE, ' ').replace(/[★☆◆◇●○♪!！|+*]+/g, ' ').replace(/\s+/g, ' ').trim();
+  let words = s.split(' ').filter(Boolean);
+  if (translate && words.some((w) => /[^\x00-\x7F]/.test(w))) {
+    // 日本語に置き換えられた語があれば、それと型番（数字入り）だけで探す
+    words = words.filter((w) => /[^\x00-\x7F]/.test(w) || /\d/.test(w));
+    if (words.some((w) => ['羽織', '帯', '浴衣'].includes(w))) words = words.filter((w) => w !== '着物');
+  }
+  return [...new Set(words)].slice(0, 4).join(' ') || String(title || '').split(' ').slice(0, 3).join(' ');
 }
 
 /* ================================================================ 共通部品 */
@@ -395,46 +416,82 @@ function productCard(p, c, s7) {
   const hist = histOf(p.id).slice(-14).map((r) => r.s1 || 0);
   const sales = trackedDays() >= 2 ? `7日で <b style="color:var(--ink)">${s7}</b>個売れた` : `出品 ${p.ebay?.n ?? 0}件`;
   return `
-    <button class="card" data-open="${esc(p.id)}">
-      ${thumb(p.img, p.name)}
-      <div class="name">${esc(p.name)}<span class="genre">${esc(genreName(p.g))}</span></div>
-      <div class="profit">${right}</div>
-      <div class="line2">${line2}</div>
-      <div class="line3">${sales}${spark(hist)}</div>
-    </button>`;
+    <div class="card">
+      <button class="card-main" data-open="${esc(p.id)}">
+        ${thumb(p.img, p.name)}
+        <div class="name">${esc(p.name)}<span class="genre">${esc(genreName(p.g))}</span></div>
+        <div class="profit">${right}</div>
+        <div class="line2">${line2}</div>
+        <div class="line3">${sales}${spark(hist)}</div>
+      </button>
+      ${linkRow('日本で探す', buyLinks(p.q_ja))}
+    </div>`;
 }
 
 /* ================================================================ 画面: 売れ筋 */
 
+const ETSY_NOTICE = 'The term "Etsy" is a trademark of Etsy, Inc. This application uses the Etsy API but is not endorsed or certified by Etsy, Inc.';
+
 function renderHot() {
   const fx = fxRate();
+  const src = app.hotSource;
   const genres = app.data.genres.filter((g) => inGenre(g.id));
-  const sections = genres.map((g) => {
-    const list = app.data.discovery?.[g.id] || [];
-    if (!list.length) return `<div class="section-title">${esc(g.name)}</div><div class="note">まだ販売実績のある出品が見つかっていません。</div>`;
-    return `<div class="section-title">${esc(g.name)}</div><div class="list">${list.map((x) => {
-      const words = searchWords(x.t);
-      const links = [
-        ['eBay出品', x.u, 'この出品を開く'],
-        ['eBay落札', `https://www.ebay.com/sch/i.html?_nkw=${enc(words)}&LH_Sold=1&LH_Complete=1`, 'eBay で売れた同じ品'],
-        ['メルカリ', `https://jp.mercari.com/search?keyword=${enc(words)}&status=sold_out`, 'メルカリの売り切れ'],
-        ['ヤフオク', `https://auctions.yahoo.co.jp/closedsearch/closedsearch?p=${enc(words)}`, 'ヤフオクの落札相場'],
-      ];
-      return `<div class="disc">
-        ${thumb(x.i, x.t)}
-        <div>
-          <div class="title">${esc(x.t)}</div>
-          <div class="nums"><b>${usd(x.p)}</b>（${yen(x.p * fx)}）· 累計 <b>${x.s}</b>個${x.s1 ? ` · 昨日 <b>+${x.s1}</b>` : ''}</div>
-        </div>
-        <div class="links">${links.map(([l, u, t]) => `<a class="link" href="${esc(u)}" title="${t}" target="_blank" rel="noopener">${l}</a>`).join('')}</div>
-      </div>`;
-    }).join('')}</div>`;
-  }).join('');
+  const etsyReady = app.data.sources?.etsy || Object.keys(app.data.etsy_discovery || {}).length > 0;
+
+  // 相場の行: この出品 / メルカリ売り切れ / ヤフオク落札 / eBay 落札（英語のまま検索）
+  const priceRow = (x, site) => {
+    const [mercari, yahoo, ebay] = soldLinks(jaQuery(x.t, false), jaQuery(x.t));
+    return linkRow('相場', [{ short: `${site}出品`, name: site, sub: 'この出品', url: x.u }, mercari, yahoo, ebay]);
+  };
+  const ebayCard = (x) => `<div class="disc">
+      ${thumb(x.i, x.t)}
+      <div>
+        <div class="title">${esc(x.t)}</div>
+        <div class="nums"><b>${usd(x.p)}</b>（${yen(x.p * fx)}）· 累計 <b>${x.s}</b>個${x.s1 ? ` · 昨日 <b>+${x.s1}</b>` : ''}</div>
+      </div>
+      ${linkRow('日本で探す', buyLinks(jaQuery(x.t)))}
+      ${priceRow(x, 'eBay')}
+    </div>`;
+  const etsyCard = (x) => `<div class="disc">
+      ${thumb(null, x.t)}
+      <div>
+        <div class="title">${esc(x.t)}</div>
+        <div class="nums"><b>${usd(x.p)}</b>（${yen(x.p * fx)}）· お気に入り <b>${x.fav}</b>${x.qty != null ? ` · 在庫 ${x.qty}` : ''}${x.s1 ? ` · 昨日 <b>${x.s1}個</b>売れた` : ''}</div>
+      </div>
+      ${linkRow('日本で探す', buyLinks(jaQuery(x.t)))}
+      ${priceRow(x, 'Etsy')}
+    </div>`;
+
+  let body;
+  if (src === 'etsy' && !etsyReady) {
+    body = `<section class="panel prose">
+      <h3 style="color:var(--ink)">Etsy はキーの登録待ちです</h3>
+      <p>Etsy の API キーを GitHub の Secrets に <code>ETSY_API_KEY</code> として入れると、日本のショップの売れ筋が毎朝ここに出ます。</p>
+    </section>`;
+  } else {
+    const data = src === 'etsy' ? app.data.etsy_discovery : app.data.discovery;
+    body = genres.map((g) => {
+      const list = data?.[g.id] || [];
+      const head = `<div class="section-title">${esc(g.name)}</div>`;
+      if (!list.length) return `${head}<div class="note">まだ見つかっていません。</div>`;
+      return `${head}<div class="list">${list.map(src === 'etsy' ? etsyCard : ebayCard).join('')}</div>`;
+    }).join('');
+  }
+
+  const note = src === 'etsy'
+    ? 'Etsy で日本のショップが出している商品。お気に入りの多い順で、在庫が前日から減ったものは「売れた」と表示します。'
+    : '日本から発送されている eBay の出品のうち、実際に売れているもの。「累計」はその出品で売れた個数、「昨日」は前日から増えた数です。';
 
   view.innerHTML = `
     ${demoBanner()}
-    <p class="note">日本から発送されている eBay の出品のうち、実際に売れているもの。「累計」はその出品で売れた個数、「昨日」は前日から増えた数です。メルカリ・ヤフオクのボタンで日本の相場をすぐ確認できます。</p>
-    ${sections}
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="販売先">
+        ${[['ebay', 'eBay'], ['etsy', 'Etsy']].map(([k, l]) => `<button data-hot="${k}" aria-pressed="${src === k}">${l}</button>`).join('')}
+      </div>
+    </div>
+    <p class="note">${note}「日本で探す」は販売中の出品を安い順で開きます。</p>
+    ${body}
+    ${src === 'etsy' ? `<p class="note" style="margin-top:16px">${esc(ETSY_NOTICE)}</p>` : ''}
   `;
 }
 
@@ -463,7 +520,8 @@ function renderMarket() {
       const last7 = rows.slice(-7);
       return `<section class="panel">
         <h3>${esc(g.name)}</h3>
-        <p class="panel-sub">直近7日: 売れた ${last7.reduce((a, r) => a + (r.s1 || 0), 0)}個 · 終了した出品 ${last7.reduce((a, r) => a + (r.v1 || 0), 0)}件</p>
+        <p class="panel-sub">eBay 直近7日: 売れた ${last7.reduce((a, r) => a + (r.s1 || 0), 0)}個 · 終了した出品 ${last7.reduce((a, r) => a + (r.v1 || 0), 0)}件${
+          last7.some((r) => r.es1 != null) ? `<br>Etsy 直近7日: 在庫が減った ${last7.reduce((a, r) => a + (r.es1 || 0), 0)}個 · 終了した出品 ${last7.reduce((a, r) => a + (r.ev1 || 0), 0)}件` : ''}</p>
         ${legend(stacks, true)}
         <div class="chart" data-bars="${g.id}"></div>
         ${dataTable(['日付', '売れた数', '終了した出品', '追跡中の出品'], rows.slice().reverse().map((r) => [md(r.d), r.s1 ?? 0, r.v1 ?? 0, r.n ?? 0]))}
@@ -546,7 +604,10 @@ function renderSettings() {
       <p><b>eBay 相場</b>: 日本から発送されている出品の「送料込みの価格」の中央値。売れている出品が3件以上あればその中央値を使います。</p>
       <p><b>仕入れ目安</b>: 楽天市場と Yahoo!ショッピングで見つかった価格の安い方から25%の位置。メルカリ・ヤフオクは自動では取らないので、詳細画面のボタンで確認してください。</p>
       <p><b>売れた数</b>: 同じ品を複数個出品している出品の販売数が前日から増えた分。<b>終了した出品</b>は、前日まであった出品が終わっていたもので、売れた可能性が高いものです。</p>
+      <p><b>日本で探す</b>: メルカリ・ヤフオク・ラクマ・Yahoo!フリマの販売中の出品を、安い順で開きます。売れ筋の英語タイトルは、よく使う言葉（kimono→着物 など）を日本語に置き換えて検索します。</p>
+      <p><b>Etsy</b>: 日本のショップの出品を毎朝調べ、在庫が前日から減った分を「売れた」としています。</p>
       <p>どれも目安です。状態・付属品・真贋・送料の実額・アメリカの関税は品物ごとに違うので、仕入れる前に必ずリンク先で確かめてください。</p>
+      <p style="font-size:11.5px">${esc(ETSY_NOTICE)}</p>
     </section>
 
     <section class="panel prose">
@@ -642,9 +703,18 @@ function openDetail(id) {
       ${p.etsy ? `<section class="panel"><h3>Etsy（日本のショップ）</h3><ul class="status-list"><li><span>出品数</span><span>${p.etsy.n}件</span></li><li><span>価格の中央値</span><span>${usd(p.etsy.med)}</span></li><li><span>昨日消えた出品</span><span>${p.etsy.v1}件</span></li></ul></section>` : ''}
 
       <section class="panel">
-        <h3>自分で相場を確認</h3>
-        <p class="panel-sub">メルカリ・ヤフオクは売り切れ・落札済みの一覧が開きます</p>
-        <div class="link-grid">${checkLinks(p.q_en, p.q_ja).map(([n, s, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${n}<span>${s}</span></a>`).join('')}</div>
+        <h3>日本で買える出品</h3>
+        <p class="panel-sub">「${esc(p.q_ja)}」で、販売中の出品を安い順に開きます</p>
+        <div class="link-grid">${[...buyLinks(p.q_ja),
+          { name: '楽天市場', sub: '安い順', url: `https://search.rakuten.co.jp/search/mall/${enc(p.q_ja)}/?s=2` },
+          { name: 'Yahoo!ショッピング', sub: '安い順', url: `https://shopping.yahoo.co.jp/search?p=${enc(p.q_ja)}&X=2` },
+        ].map(gridLink).join('')}</div>
+      </section>
+
+      <section class="panel">
+        <h3>売れた価格を確かめる</h3>
+        <p class="panel-sub">日本は売り切れ・落札済み、海外は売れた出品の一覧</p>
+        <div class="link-grid">${soldLinks(p.q_en, p.q_ja).map(gridLink).join('')}</div>
       </section>
       ${p.errors?.length ? `<p class="note">取得エラー: ${p.errors.map(esc).join(' / ')}</p>` : ''}
     </div>
@@ -701,6 +771,8 @@ view.addEventListener('click', (e) => {
   if (open) return openDetail(open.dataset.open);
   const sort = e.target.closest('[data-sort]');
   if (sort) { app.sort = sort.dataset.sort; store.set('sort', app.sort); return render(); }
+  const hot = e.target.closest('[data-hot]');
+  if (hot) { app.hotSource = hot.dataset.hot; store.set('hotSource', app.hotSource); return render(); }
   if (e.target.closest('[data-show-all]')) { app.showAll = true; return render(); }
   if (e.target.id === 'reset-settings') {
     store.del('settings');

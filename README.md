@@ -16,6 +16,7 @@ GitHub Pages (docs/) → iPhone の Safari で開く
 ```
 
 メルカリとヤフオクは公開 API が無く、規約上も自動取得できないので、
+各商品に「日本で探す」ボタン（メルカリ・ヤフオク・ラクマ・Yahoo!フリマの販売中を安い順）と、
 詳細画面に「売り切れ一覧」「落札相場」を開くボタンを付けてある。
 
 ## はじめの設定
@@ -32,6 +33,14 @@ GitHub Pages (docs/) → iPhone の Safari で開く
 
 - 楽天: https://webservice.rakuten.co.jp/ でアプリを登録し、**アプリID** と **アクセスキー** を控える
 - Yahoo!: https://e.developer.yahoo.co.jp/register でアプリを登録し、**Client ID** を控える
+
+### 2b. Etsy の API キー（任意）
+
+1. Etsy のアカウントでログインし、https://www.etsy.com/developers/register でアプリを登録する
+   - 他のショップの出品を見るので「Personal App」の審査が必要。承認まで時間がかかることがある
+2. 承認されたら **Keystring** と **Shared secret** を控え、`keystring:shared_secret` の形（間にコロン）で `ETSY_API_KEY` に入れる
+
+入れると、監視商品の Etsy 相場と、売れ筋タブの「Etsy」（日本のショップの出品）が毎朝更新される。
 
 ### 3. GitHub に置く
 
@@ -70,13 +79,14 @@ GitHub Pages (docs/) → iPhone の Safari で開く
 | `cond` | `used` / `new` / `any` |
 | `min_usd` / `min_jpy` | これより安いものは付属品などとして無視 |
 
-売れ筋タブの検索語はジャンルごとの `discovery` で変えられる。
+売れ筋タブの検索語はジャンルごとの `discovery`（eBay）と `etsy_discovery`（Etsy）で変えられる。
 
 ## 数字の決め方
 
 - **eBay 相場**: 日本発送の出品の「価格＋アメリカ向け送料」の中央値。販売実績のある出品が3件以上あればそちらの中央値
 - **売れた数**: 出品ごとの累計販売数（eBay の `estimatedSoldQuantity`）を毎日記録し、前日から増えた分
 - **終了した出品**: 前日まで検索に出ていた出品が終了していたもの（売れた可能性が高い）
+- **Etsy の売れた数**: Etsy は販売数を公開していないので、日本のショップの出品の在庫が前日から減った分と、売り切れになった出品を数える
 - **仕入れ目安**: 楽天・Yahoo! で見つかった価格の安い方から25%の位置
 - **見込み利益**: 売値 − eBay手数料 − 為替手数料 − 国際送料 − 仕入れ値 − 国内送料。
   手数料率や送料はアプリの「設定」タブで端末ごとに変えられる
@@ -100,3 +110,4 @@ EBAY_CLIENT_ID=... EBAY_CLIENT_SECRET=... python scripts/fetch.py --only nikon-f
 
 - GitHub の無料プランでは、Pages で公開したページと監視リストは URL を知っている人なら見られる（API キーは Secrets に入れるので公開されない）
 - eBay Browse API は1日5,000回まで。初期設定の監視リスト（30商品＋売れ筋）で1日1,500〜2,500回程度
+- The term "Etsy" is a trademark of Etsy, Inc. This application uses the Etsy API but is not endorsed or certified by Etsy, Inc.

@@ -361,28 +361,47 @@ class YahooShopping:
 
 
 class Etsy:
-    URL = "https://openapi.etsy.com/v3/application/listings/active"
+    API = "https://openapi.etsy.com/v3/application"
 
     def __init__(self, api_key):
         self.headers = {"x-api-key": api_key}
+        self.calls = 0
 
-    def search(self, keywords, fx):
-        qs = urllib.parse.urlencode({"keywords": keywords, "shop_location": "Japan", "limit": 100})
-        res = http_json(f"{self.URL}?{qs}", self.headers)
-        out = []
-        for r in res.get("results", []):
-            price = r.get("price") or {}
-            if not price.get("amount"):
-                continue
-            amount = price["amount"] / (price.get("divisor") or 1)
-            currency = price.get("currency_code")
-            if currency == "JPY":
-                amount /= fx
-            elif currency != "USD":
-                continue
-            out.append({"id": str(r["listing_id"]), "t": html.unescape(r.get("title", "")),
-                        "p": round(amount, 2)})
-        return out
+    def _get(self, path):
+        self.calls += 1
+        time.sleep(0.25)  # 1秒に数回までに抑える
+        return http_json(self.API + path, self.headers)
+
+    def search(self, keywords, fx, sort_on="score"):
+        """日本にあるショップの出品中の商品。"""
+        qs = urllib.parse.urlencode({"keywords": keywords, "shop_location": "Japan", "limit": 100,
+                                     "sort_on": sort_on})
+        rows = (etsy_listing(r, fx) for r in self._get(f"/listings/active?{qs}").get("results", []))
+        return [x for x in rows if x]
+
+    def listing(self, listing_id):
+        try:
+            return self._get(f"/listings/{listing_id}")
+        except ApiError as e:
+            if e.status == 404:
+                return GONE
+            if 400 <= e.status < 500:
+                return None
+            raise
+
+
+def etsy_listing(r, fx):
+    price = r.get("price") or {}
+    if not price.get("amount"):
+        return None
+    amount = price["amount"] / (price.get("divisor") or 1)
+    currency = price.get("currency_code")
+    if currency == "JPY":
+        amount /= fx
+    elif currency != "USD":
+        return None
+    return {"id": str(r["listing_id"]), "t": html.unescape(r.get("title", "")), "p": round(amount, 2),
+            "qty": r.get("quantity"), "fav": r.get("num_favorers") or 0, "u": r.get("url")}
 
 
 # ---------------------------------------------------------------- 1商品の処理
@@ -501,6 +520,87 @@ def process_discovery(genre, ctx):
     return results[:DISCOVERY_TOP]
 
 
+def process_etsy_discovery(genre, ctx):
+    """Etsy の日本のショップの売れ筋。
+
+    Etsy は出品ごとの販売数を公開していないので、在庫数が前日から減った分を「売れた数」、
+    検索から消えて売り切れ・終了になっていたものを「終了した出品」として数える。
+    items[listingId] = {g, qty: 最新の在庫, pqty: 前日終了時点の在庫, d: 最後に調べた日, seen, end, ended}
+    """
+    etsy, fx, today = ctx["etsy"], ctx["fx"], ctx["today"]
+    items = ctx["state"].setdefault("etsy_items", {})
+    gid = genre["id"]
+    exclude = genre.get("exclude_en", [])
+
+    def roll(e):
+        if e["d"] != today:
+            e["pqty"], e["d"] = e["qty"], today
+
+    found = {}
+    for d in genre.get("etsy_discovery", []):
+        try:
+            for x in etsy.search(d["q"], fx):
+                if x["p"] >= d.get("min_usd", 0) and title_ok(x["t"], [], exclude):
+                    found.setdefault(x["id"], {**x, "q": d["q"]})
+        except ApiError as e:
+            log(f"    Etsy「{d['q']}」失敗: {e}")
+
+    for lid, x in found.items():
+        e = items.get(lid)
+        if e is None:
+            e = items[lid] = {"g": gid, "qty": x["qty"], "pqty": None, "d": today}
+        roll(e)
+        e["qty"], e["seen"] = x["qty"], today
+        for k in ("end", "ended"):
+            e.pop(k, None)
+
+    # 昨日まで出ていたのに今日は出てこなかった出品が、売り切れたのか終わったのかを確かめる
+    since = days_ago(today, RECHECK_DAYS)
+    missing = [lid for lid, e in items.items()
+               if e["g"] == gid and e.get("seen") != today and "end" not in e and e.get("seen", "") >= since]
+    for lid in missing[:60]:
+        e = items[lid]
+        try:
+            r = etsy.listing(lid)
+        except ApiError as err:
+            log(f"    Etsy 出品 {lid} 失敗: {err}")
+            continue
+        roll(e)
+        if r is GONE:
+            e["end"], e["ended"] = "gone", today
+        elif isinstance(r, dict):
+            if r.get("state") == "sold_out":
+                e["end"], e["ended"], e["qty"] = "sold", today, 0
+            elif r.get("state") != "active":
+                e["end"], e["ended"] = "gone", today
+            elif r.get("quantity") is not None:
+                e["qty"] = r["quantity"]
+
+    def sold_delta(e):
+        if e["d"] != today or e["pqty"] is None or e["qty"] is None or e.get("end") == "gone":
+            return 0
+        return max(0, e["pqty"] - e["qty"])
+
+    results = []
+    for lid, x in found.items():
+        results.append({k: x[k] for k in ("t", "p", "qty", "fav", "u", "q")} | {"s1": sold_delta(items[lid])})
+    results.sort(key=lambda x: (-x["s1"], -x["fav"], x["p"]))
+
+    mine = [e for e in items.values() if e["g"] == gid and e["d"] == today]
+    summary = {"es1": sum(sold_delta(e) for e in mine),
+               "ev1": sum(1 for e in mine if e.get("ended") == today and e.get("end") == "gone"),
+               "en": len(found)}
+    log(f"    Etsy 売れ筋 {len(found)}件 / 在庫減 {summary['es1']} / 終了 {summary['ev1']}")
+    return results[:DISCOVERY_TOP], summary
+
+
+def prune_etsy(state, today):
+    items = state.get("etsy_items", {})
+    keep_since, ended_since = days_ago(today, STATE_KEEP_DAYS), days_ago(today, 2)
+    for lid in [lid for lid, e in items.items() if e["d"] < keep_since or e.get("ended", "9999") < ended_since]:
+        del items[lid]
+
+
 # ---------------------------------------------------------------- 保存
 
 def load_json(path, default):
@@ -563,14 +663,16 @@ def main():
         log("eBay の取得がすべて失敗したため、データを更新せずに終了します。")
         return 1
 
-    discovery = {}
+    discovery, etsy_discovery, etsy_summary = {}, {}, {}
     if not args.no_discovery and not args.only:
         for g in cfg["genres"]:
             log(f"- 売れ筋: {g['name']}")
             discovery[g["id"]] = process_discovery(g, ctx)
+            if ctx["etsy"]:
+                etsy_discovery[g["id"]], etsy_summary[g["id"]] = process_etsy_discovery(g, ctx)
 
     tracker = ctx["tracker"]
-    log(f"eBay API 呼び出し {ctx['ebay'].calls} 回")
+    log(f"API 呼び出し eBay {ctx['ebay'].calls} 回" + (f" / Etsy {ctx['etsy'].calls} 回" if ctx["etsy"] else ""))
     if args.dry_run:
         log(json.dumps(out_products, ensure_ascii=False, indent=1)[:4000])
         return 0
@@ -586,7 +688,7 @@ def main():
     if not args.only:
         for gid in genres:
             upsert(history.setdefault("genres", {}).setdefault(gid, []),
-                   {"d": today, **tracker.summary(lambda e, gid=gid: e["g"] == gid)})
+                   {"d": today, **tracker.summary(lambda e, gid=gid: e["g"] == gid), **etsy_summary.get(gid, {})})
     upsert(history.setdefault("fx", []), {"d": today, "v": round(fx, 2)})
     history["start"] = min(r["d"] for r in history["fx"])
 
@@ -598,6 +700,7 @@ def main():
         order = [p["id"] for p in cfg["products"]]
         out_products = sorted(merged.values(), key=lambda o: order.index(o["id"]) if o["id"] in order else 999)
         discovery = latest.get("discovery", {})
+        etsy_discovery = latest.get("etsy_discovery", {})
 
     write_json(DATA_DIR / "latest.json", {
         "generated_at": datetime.now(JST).isoformat(timespec="minutes"),
@@ -610,10 +713,12 @@ def main():
                     "etsy": bool(ctx["etsy"])},
         "products": out_products,
         "discovery": discovery,
-        "api_calls": {"ebay": ctx["ebay"].calls},
+        "etsy_discovery": etsy_discovery,
+        "api_calls": {"ebay": ctx["ebay"].calls, "etsy": ctx["etsy"].calls if ctx["etsy"] else 0},
     })
     write_json(DATA_DIR / "history.json", history)
     tracker.prune()
+    prune_etsy(state, today)
     write_json(STATE_PATH, state)
     log("保存しました。")
     return 0
