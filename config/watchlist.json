@@ -1,0 +1,68 @@
+{
+  "_help": "監視リスト。q_en=eBay検索語, q_ja=楽天/Yahoo!ショッピング/メルカリ/ヤフオク検索語。must=タイトルに必須の語（英日共通。空白・ハイフンは無視して照合）, must_en/must_ja=片側だけの必須語, exclude=除外語。cond=used/new/any。min_usd/min_jpy=これ未満は付属品などとして除外。",
+
+  "settings": {
+    "fee_rate": 0.16,
+    "fixed_fee_usd": 0.4,
+    "fx_loss_rate": 0.02,
+    "other_cost_rate": 0.0,
+    "domestic_ship_jpy": 800,
+    "fx_fallback": 150,
+    "ship_jpy": { "camera": 3500, "craft": 4500, "hobby": 3000, "fashion": 2500 }
+  },
+
+  "genres": [
+    { "id": "camera", "name": "カメラ・レンズ",
+      "exclude_en": ["case only", "strap", "manual", "lens cap", "hood", "for parts", "not working", "junk", "box only", "shutter release", "battery"],
+      "exclude_ja": ["ジャンク", "部品", "ケースのみ", "ストラップ", "説明書", "キャップ", "フード", "互換", "元箱のみ", "訳あり"],
+      "discovery": [ { "q": "film camera", "min_usd": 50 }, { "q": "lens", "min_usd": 50 } ] },
+    { "id": "craft", "name": "工芸品",
+      "exclude_en": ["replica", "reproduction", "stand only", "box only"],
+      "exclude_ja": ["訳あり", "箱のみ", "レプリカ", "キーホルダー"],
+      "discovery": [ { "q": "japanese pottery", "min_usd": 30 }, { "q": "tetsubin", "min_usd": 40 }, { "q": "japanese knife", "min_usd": 40 } ] },
+    { "id": "hobby", "name": "ゲーム・ホビー",
+      "exclude_en": ["game only", "cartridge only", "controller only", "shell", "replacement", "screen", "mini", "classic edition", "for parts", "junk", "case only"],
+      "exclude_ja": ["ジャンク", "ソフトのみ", "コントローラーのみ", "ミニ", "クラシック", "互換", "部品", "ケースのみ", "シェル"],
+      "discovery": [ { "q": "famicom", "min_usd": 20 }, { "q": "japanese figure", "min_usd": 30 }, { "q": "pokemon card japanese", "min_usd": 20 } ] },
+    { "id": "fashion", "name": "時計・ファッション",
+      "exclude_en": ["band only", "strap only", "parts", "not working", "junk", "box only", "fake"],
+      "exclude_ja": ["ジャンク", "ベルトのみ", "部品", "箱のみ", "訳あり"],
+      "discovery": [ { "q": "seiko", "min_usd": 50 }, { "q": "issey miyake", "min_usd": 40 }, { "q": "kimono", "min_usd": 30 } ] }
+  ],
+
+  "products": [
+    { "id": "nikon-fm2", "g": "camera", "name": "ニコン FM2", "q_en": "Nikon FM2", "q_ja": "ニコン FM2", "must": ["fm2"], "cond": "used", "min_usd": 80, "min_jpy": 8000 },
+    { "id": "canon-ae1p", "g": "camera", "name": "キヤノン AE-1 プログラム", "q_en": "Canon AE-1 Program", "q_ja": "Canon AE-1 PROGRAM", "must": ["ae-1", "program"], "cond": "used", "min_usd": 60, "min_jpy": 6000 },
+    { "id": "contax-t2", "g": "camera", "name": "コンタックス T2", "q_en": "Contax T2", "q_ja": "CONTAX T2", "must": ["contax", "t2"], "cond": "used", "min_usd": 300, "min_jpy": 40000 },
+    { "id": "ricoh-gr1", "g": "camera", "name": "リコー GR1", "q_en": "Ricoh GR1", "q_ja": "RICOH GR1", "must": ["gr1"], "cond": "used", "min_usd": 150, "min_jpy": 15000 },
+    { "id": "pentax-67", "g": "camera", "name": "ペンタックス 67", "q_en": "Pentax 67 body", "q_ja": "PENTAX 67 ボディ", "must": ["pentax", "67"], "exclude": ["lens only", "レンズのみ"], "cond": "used", "min_usd": 250, "min_jpy": 30000 },
+    { "id": "mamiya-rb67", "g": "camera", "name": "マミヤ RB67", "q_en": "Mamiya RB67", "q_ja": "Mamiya RB67", "must": ["rb67"], "cond": "used", "min_usd": 200, "min_jpy": 20000 },
+    { "id": "konica-bigmini", "g": "camera", "name": "コニカ ビッグミニ", "q_en": "Konica Big Mini", "q_ja": "Konica BiG mini", "must": ["big mini"], "cond": "used", "min_usd": 60, "min_jpy": 5000 },
+    { "id": "fuji-klasse", "g": "camera", "name": "富士フイルム クラッセ", "q_en": "Fujifilm Klasse", "q_ja": "FUJIFILM KLASSE", "must": ["klasse"], "cond": "used", "min_usd": 250, "min_jpy": 30000 },
+    { "id": "takumar-50-14", "g": "camera", "name": "タクマー 50mm F1.4", "q_en": "Takumar 50mm f1.4", "q_ja": "Takumar 50mm F1.4", "must": ["takumar", "50mm", "1.4"], "cond": "used", "min_usd": 40, "min_jpy": 4000 },
+    { "id": "nikkor-50-12", "g": "camera", "name": "ニッコール Ai-S 50mm F1.2", "q_en": "Nikon Ai-S 50mm f1.2", "q_ja": "Ai-S Nikkor 50mm F1.2", "must": ["50mm", "1.2"], "must_ja": ["nikkor"], "cond": "used", "min_usd": 150, "min_jpy": 15000 },
+
+    { "id": "nambu-tetsubin", "g": "craft", "name": "南部鉄器 鉄瓶", "q_en": "Nambu tetsubin", "q_ja": "南部鉄器 鉄瓶", "must_en": ["tetsubin"], "must_ja": ["鉄瓶"], "exclude": ["急須"], "cond": "any", "min_usd": 60, "min_jpy": 5000 },
+    { "id": "tokoname-kyusu", "g": "craft", "name": "常滑焼 急須", "q_en": "Tokoname kyusu", "q_ja": "常滑焼 急須", "must_en": ["tokoname"], "must_ja": ["常滑", "急須"], "cond": "any", "min_usd": 30, "min_jpy": 2000 },
+    { "id": "hagi-chawan", "g": "craft", "name": "萩焼 茶碗", "q_en": "Hagi ware tea bowl", "q_ja": "萩焼 茶碗", "must_en": ["hagi"], "must_ja": ["萩", "茶碗"], "cond": "any", "min_usd": 30, "min_jpy": 2000 },
+    { "id": "bizen-vase", "g": "craft", "name": "備前焼 花入", "q_en": "Bizen ware vase", "q_ja": "備前焼 花入", "must_en": ["bizen"], "must_ja": ["備前"], "cond": "any", "min_usd": 40, "min_jpy": 3000 },
+    { "id": "kutani-plate", "g": "craft", "name": "九谷焼 皿", "q_en": "Kutani plate", "q_ja": "九谷焼 皿", "must_en": ["kutani"], "must_ja": ["九谷"], "cond": "any", "min_usd": 30, "min_jpy": 2000 },
+    { "id": "sakai-takayuki-gyuto", "g": "craft", "name": "堺孝行 牛刀", "q_en": "Sakai Takayuki gyuto", "q_ja": "堺孝行 牛刀", "must_en": ["sakai takayuki", "gyuto"], "must_ja": ["牛刀"], "cond": "new", "min_usd": 60, "min_jpy": 6000 },
+    { "id": "tojiro-dp-gyuto", "g": "craft", "name": "藤次郎 DP 牛刀", "q_en": "Tojiro DP gyuto", "q_ja": "藤次郎 DP 牛刀", "must_en": ["tojiro", "gyuto"], "must_ja": ["牛刀"], "cond": "new", "min_usd": 50, "min_jpy": 5000 },
+
+    { "id": "super-famicom", "g": "hobby", "name": "スーパーファミコン 本体", "q_en": "Super Famicom console", "q_ja": "スーパーファミコン 本体", "must_en": ["super famicom"], "must_ja": ["スーパーファミコン", "本体"], "cond": "used", "min_usd": 40, "min_jpy": 3000 },
+    { "id": "gameboy-color", "g": "hobby", "name": "ゲームボーイカラー 本体", "q_en": "Game Boy Color console", "q_ja": "ゲームボーイカラー 本体", "must_en": ["game boy color"], "must_ja": ["ゲームボーイカラー", "本体"], "cond": "used", "min_usd": 30, "min_jpy": 2500 },
+    { "id": "sega-saturn", "g": "hobby", "name": "セガサターン 本体", "q_en": "Sega Saturn console", "q_ja": "セガサターン 本体", "must_en": ["saturn"], "must_ja": ["セガサターン", "本体"], "cond": "used", "min_usd": 40, "min_jpy": 3000 },
+    { "id": "pc-engine", "g": "hobby", "name": "PCエンジン 本体", "q_en": "PC Engine console", "q_ja": "PCエンジン 本体", "must_en": ["pc engine"], "must_ja": ["pcエンジン", "本体"], "cond": "used", "min_usd": 50, "min_jpy": 3000 },
+    { "id": "ngp-color", "g": "hobby", "name": "ネオジオポケットカラー", "q_en": "Neo Geo Pocket Color console", "q_ja": "ネオジオポケットカラー 本体", "must_en": ["neo geo pocket color"], "must_ja": ["ネオジオポケットカラー"], "cond": "used", "min_usd": 40, "min_jpy": 3000 },
+    { "id": "pokeca-151-box", "g": "hobby", "name": "ポケモンカード151 BOX", "q_en": "Pokemon 151 booster box japanese", "q_ja": "ポケモンカード151 BOX", "must": ["151", "box"], "exclude": ["empty", "空箱", "pack only", "バラ"], "cond": "new", "min_usd": 60, "min_jpy": 8000 },
+
+    { "id": "seiko-sarb017", "g": "fashion", "name": "セイコー アルピニスト SARB017", "q_en": "Seiko SARB017", "q_ja": "セイコー SARB017", "must": ["sarb017"], "cond": "used", "min_usd": 250, "min_jpy": 30000 },
+    { "id": "seiko-sbdc101", "g": "fashion", "name": "セイコー プロスペックス SBDC101", "q_en": "Seiko SBDC101", "q_ja": "セイコー SBDC101", "must": ["sbdc101"], "cond": "any", "min_usd": 400, "min_jpy": 50000 },
+    { "id": "gshock-dw5600", "g": "fashion", "name": "G-SHOCK DW-5600", "q_en": "Casio G-Shock DW-5600", "q_ja": "G-SHOCK DW-5600", "must": ["dw-5600"], "cond": "new", "min_usd": 40, "min_jpy": 5000 },
+    { "id": "porter-tanker", "g": "fashion", "name": "ポーター タンカー", "q_en": "Porter Yoshida Tanker", "q_ja": "吉田カバン ポーター タンカー", "must_en": ["porter", "tanker"], "must_ja": ["タンカー"], "cond": "any", "min_usd": 60, "min_jpy": 8000 },
+    { "id": "pleats-please", "g": "fashion", "name": "プリーツプリーズ", "q_en": "Pleats Please Issey Miyake", "q_ja": "プリーツプリーズ イッセイミヤケ", "must_en": ["pleats please"], "must_ja": ["プリーツプリーズ"], "cond": "used", "min_usd": 40, "min_jpy": 3000 },
+    { "id": "baobao", "g": "fashion", "name": "バオバオ イッセイミヤケ", "q_en": "Bao Bao Issey Miyake bag", "q_ja": "BAO BAO イッセイミヤケ", "must": ["bao bao"], "cond": "used", "min_usd": 60, "min_jpy": 5000 },
+    { "id": "kapital-denim", "g": "fashion", "name": "キャピタル デニム", "q_en": "Kapital denim", "q_ja": "KAPITAL デニム", "must": ["kapital"], "cond": "used", "min_usd": 60, "min_jpy": 5000 }
+  ]
+}
