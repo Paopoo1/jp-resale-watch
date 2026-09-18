@@ -325,14 +325,21 @@ class Rakuten:
             params["minPrice"] = int(min_jpy)
         res = http_json(f"{self.URL}?{urllib.parse.urlencode(params)}", self.headers)
         time.sleep(1.1)
-        return [{
-            "t": it.get("itemName", ""),
-            "p": int(it.get("itemPrice") or 0),
-            "u": it.get("itemUrl"),
-            "i": (it.get("mediumImageUrls") or [None])[0],
-            "shop": it.get("shopName"),
-            "src": "楽天",
-        } for it in res.get("items", [])]
+        self.last_keys = sorted(res)[:8]  # 0件のときの切り分け用
+        out = []
+        # formatVersion=2 は {"Items": [{...}]}、1 は {"Items": [{"Item": {...}}]}
+        for it in res.get("Items") or res.get("items") or []:
+            it = it.get("Item", it)
+            img = (it.get("mediumImageUrls") or [None])[0]
+            out.append({
+                "t": it.get("itemName", ""),
+                "p": int(it.get("itemPrice") or 0),
+                "u": it.get("itemUrl"),
+                "i": img.get("imageUrl") if isinstance(img, dict) else img,
+                "shop": it.get("shopName"),
+                "src": "楽天",
+            })
+        return out
 
 
 class YahooShopping:
@@ -635,7 +642,9 @@ def check_sources(ctx, fx):
             log(f"キー確認 {name}: 未設定")
             continue
         try:
-            log(f"キー確認 {name}: OK（{len(run(client))}件）")
+            n = len(run(client))
+            extra = f" 応答の項目: {client.last_keys}" if n == 0 and hasattr(client, "last_keys") else ""
+            log(f"キー確認 {name}: OK（{n}件）{extra}")
         except ApiError as e:
             log(f"キー確認 {name}: NG {e}")
 
