@@ -1,0 +1,9 @@
+{
+  "name": "export-radar-push",
+  "private": true,
+  "description": "EXPORT RADAR SYSTEM の iPhone 通知サーバー（Railway で動かす）",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "web-push": "^3.6.7" }
+}

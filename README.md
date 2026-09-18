@@ -111,3 +111,18 @@ EBAY_CLIENT_ID=... EBAY_CLIENT_SECRET=... python scripts/fetch.py --only nikon-f
 - GitHub の無料プランでは、Pages で公開したページと監視リストは URL を知っている人なら見られる（API キーは Secrets に入れるので公開されない）
 - eBay Browse API は1日5,000回まで。初期設定の監視リスト（30商品＋売れ筋）で1日1,500〜2,500回程度
 - The term "Etsy" is a trademark of Etsy, Inc. This application uses the Etsy API but is not endorsed or certified by Etsy, Inc.
+
+## iPhone の通知（Railway）
+
+`push-server/` は、毎朝のデータ更新のあとに条件（最低利益・利益率）に合う商品をプッシュ通知で知らせる小さなサーバー。
+
+1. Railway で **New Project → Deploy from GitHub repo** → このリポジトリを選ぶ
+2. サービスの **Settings**
+   - **Root Directory**: `push-server`
+   - **Watch Paths**: `push-server/**`（毎朝のデータ更新で再デプロイされないように）
+   - **Networking → Generate Domain** で URL を作る
+3. サービスに **Volume** を追加し、マウント先を `/data` にする（通知の登録と鍵を保存）
+4. できた URL を `docs/app.js` の `PUSH_API` に入れる
+5. iPhone のホーム画面のアプリ →「設定」→「通知をオンにする」
+
+サーバーは 10 分ごとに `docs/data/latest.json` を見て、新しくなっていたら通知する（GitHub Actions 側の変更は不要）。

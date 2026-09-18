@@ -3,3 +3,5 @@ __pycache__/
 .env
 .claude/
 .DS_Store
+node_modules/
+push-server/data/

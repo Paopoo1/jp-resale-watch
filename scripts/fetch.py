@@ -91,9 +91,19 @@ def norm(text):
     return "".join(ch for ch in t if not ch.isspace() and ch not in "-_・/")
 
 
+def has_token(title, token):
+    t = norm(token)
+    if t.isdigit() or len(t) <= 2:
+        # 「67」が「15670」の一部に当たらないよう、前後に英数字が続かないことを確かめる
+        loose = unicodedata.normalize("NFKC", title or "").lower()
+        pat = r"(?<![0-9a-z])" + r"[\s\-_・/]*".join(map(re.escape, t)) + r"(?![0-9a-z])"
+        return re.search(pat, loose) is not None
+    return t in norm(title)
+
+
 def title_ok(title, must, exclude):
     t = norm(title)
-    return all(norm(m) in t for m in must) and not any(norm(x) in t for x in exclude)
+    return all(has_token(title, m) for m in must) and not any(norm(x) in t for x in exclude)
 
 
 def quantile(values, q):
@@ -230,6 +240,7 @@ def listing_from_summary(s):
         "u": s.get("itemWebUrl"),
         "i": (s.get("image") or {}).get("imageUrl")
              or ((s.get("thumbnailImages") or [{}])[0]).get("imageUrl"),
+        "sl": (s.get("seller") or {}).get("username"),
     }
 
 
@@ -240,7 +251,7 @@ class Tracker:
 
     items[itemId] = {g: ジャンル, p: 商品ID|None, s: 最新の累計販売数,
                      ps: 前日終了時点の累計販売数, d: 最後に調べた日, seen: 最後に検索に出た日,
-                     gone: 出品終了を確認した日}
+                     gone: 出品終了を確認した日, pr: 最後に見た価格(USD), sl: 売り手}
     """
 
     def __init__(self, state, today):
@@ -251,7 +262,7 @@ class Tracker:
         if e["d"] != self.today:
             e["ps"], e["d"] = e["s"], self.today
 
-    def observe(self, item_id, sold, genre, product=None, in_search=True):
+    def observe(self, item_id, sold, genre, product=None, in_search=True, price=None, seller=None):
         e = self.items.get(item_id)
         if e is None:
             e = self.items[item_id] = {"g": genre, "s": sold, "ps": None, "d": self.today}
@@ -263,7 +274,23 @@ class Tracker:
             e["seen"] = self.today
         if product and not e.get("p"):
             e["p"] = product
+        if price is not None:
+            e["pr"] = price
+        if seller:
+            e["sl"] = seller
         return e
+
+    def sales_today(self, match):
+        """今日わかった販売: [日付, 価格, 個数, 種類(q=複数個出品の販売 / e=出品終了)]"""
+        out = []
+        for e in self.items.values():
+            if not match(e) or e["d"] != self.today or e.get("pr") is None:
+                continue
+            if self.delta(e):
+                out.append([self.today, e["pr"], self.delta(e), "q"])
+            if e.get("gone") == self.today:
+                out.append([self.today, e["pr"], 1, "e"])
+        return out
 
     def mark_gone(self, item_id):
         e = self.items[item_id]
@@ -303,8 +330,28 @@ def recheck(ebay, tracker, match, genre, product=None):
         if d is GONE:
             tracker.mark_gone(iid)
         elif isinstance(d, dict):
-            tracker.observe(iid, sold_quantity(d), genre, product, in_search=False)
+            tracker.observe(iid, sold_quantity(d), genre, product, in_search=False, price=landed_usd(d))
     return len(ids)
+
+
+def liquidity(events, tracked, sellers, today):
+    """売れた記録から流動性の数字を出す。events = [[日付, 価格, 個数, 種類], ...]"""
+    since = {n: days_ago(today, n) for n in (7, 14, 30)}
+    ev30 = [e for e in events if e[0] > since[30]]
+    s30 = sum(e[2] for e in ev30)
+    # 1つの出品の大量販売に引っぱられないよう、1記録あたり最大3個分として価格を数える
+    prices = [e[1] for e in ev30 for _ in range(min(e[2], 3))]
+    return {
+        "s7": sum(e[2] for e in events if e[0] > since[7]),
+        "s30": s30,
+        "d14": len({e[0] for e in events if e[0] > since[14]}),
+        "str": round(s30 / (s30 + tracked), 3) if s30 + tracked else None,
+        "dos": round(tracked / (s30 / 30)) if s30 else None,
+        "med": median(prices),
+        "cnt": len(prices),
+        "tracked": tracked,
+        "sellers": sellers,
+    }
 
 
 # ---------------------------------------------------------------- 日本側・Etsy
@@ -436,38 +483,56 @@ def process_product(p, genre, ctx):
             d = details.get(x["id"])
             if isinstance(d, dict):
                 x["s"] = sold_quantity(d)
-                tracker.observe(x["id"], x["s"], p["g"], p["id"])
+                tracker.observe(x["id"], x["s"], p["g"], p["id"], price=x["p"], seller=x.get("sl"))
         rechecked = recheck(ebay, tracker, lambda e: e.get("p") == p["id"], p["g"], p["id"])
+
+        # 売れた記録を貯める（同じ日に再実行したら今日の分は入れ直す）
+        mine = lambda e: e.get("p") == p["id"]  # noqa: E731
+        sales = ctx["state"].setdefault("sales", {}).setdefault(p["id"], [])
+        sales[:] = [e for e in sales if e[0] != ctx["today"] and e[0] > days_ago(ctx["today"], 60)]
+        sales += tracker.sales_today(mine)
+        liq = liquidity(sales, len(tracked), len({x["sl"] for x in listings if x.get("sl")}), ctx["today"])
 
         sold_prices = [x["p"] for x in tracked if x.get("s", 0) > 0]
         ask = median([x["p"] for x in listings])
         sold_med = median(sold_prices) if len(sold_prices) >= 3 else None
-        agg = tracker.summary(lambda e: e.get("p") == p["id"])
+        # 売値の基準: 売れた記録が5件以上あればその中央値、次に複数個出品の価格、最後に出品価格
+        if liq["cnt"] >= 5:
+            sell, basis = liq["med"], "sold"
+        elif sold_med:
+            sell, basis = sold_med, "multi"
+        else:
+            sell, basis = ask, "ask"
+        agg = tracker.summary(mine)
         top = sorted(tracked, key=lambda x: (-x.get("s", 0), x["p"]))[:5]
         out["img"] = next((x["i"] for x in top if x.get("i")), None)
         out["ebay"] = {
-            "n": len(listings), "ask": ask, "sold_med": sold_med, "sell": sold_med or ask,
+            "n": len(listings), "ask": ask, "sold_med": sold_med, "sell": sell, "basis": basis,
             "sold_total": sum(x.get("s", 0) for x in tracked),
-            "s1": agg["s1"], "v1": agg["v1"],
+            "s1": agg["s1"], "v1": agg["v1"], "liq": liq,
             "top": [{k: x.get(k) for k in ("t", "p", "s", "u", "i")} for x in top],
         }
-        log(f"    eBay {len(listings)}件 / 中央値 ${ask} / 本日販売 {agg['s1']} / 終了 {agg['v1']} (再確認 {rechecked})")
+        log(f"    eBay {len(listings)}件 / 売値 ${sell}（{basis}）/ 30日 {liq['s30']}個 / 本日販売 {agg['s1']} / 終了 {agg['v1']} (再確認 {rechecked})")
     except ApiError as e:
         out["errors"].append(f"eBay: {e}")
         log(f"    eBay 失敗: {e}")
 
     # 日本側: 楽天市場・Yahoo!ショッピング
+    # eBay の売値の一定割合より安いものは、ケースや付属品など別の品物とみなして探さない
+    floor = max(min_jpy, 1)
+    if out["ebay"] and out["ebay"]["sell"]:
+        floor = max(floor, round(out["ebay"]["sell"] * fx * ctx["settings"].get("jp_floor_ratio", 0.2)))
     items = []
     for name, client in (("楽天", ctx["rakuten"]), ("Yahoo!", ctx["yahoo"])):
         if not client:
             continue
         try:
-            found = client.search(p["q_ja"], min_jpy) if name == "楽天" else client.search(p["q_ja"], min_jpy, cond)
+            found = client.search(p["q_ja"], floor) if name == "楽天" else client.search(p["q_ja"], floor, cond)
             items += found
         except ApiError as e:
             out["errors"].append(f"{name}: {e}")
             log(f"    {name} 失敗: {e}")
-    items = [x for x in items if x["p"] >= max(min_jpy, 1) and title_ok(x["t"], must_ja, exclude_ja)]
+    items = [x for x in items if x["p"] >= floor and title_ok(x["t"], must_ja, exclude_ja)]
     if items:
         prices = sorted(x["p"] for x in items)
         out["jp"] = {"n": len(items), "min": prices[0], "p25": round(quantile(prices, 0.25)),
@@ -701,7 +766,7 @@ def main():
     log(f"為替 1USD = {fx:.2f}円 ({fx_source})")
 
     ctx = {
-        "today": today, "fx": fx, "state": state, "tracker": Tracker(state, today),
+        "today": today, "fx": fx, "state": state, "tracker": Tracker(state, today), "settings": cfg["settings"],
         "rakuten": Rakuten(env("RAKUTEN_APP_ID"), env("RAKUTEN_ACCESS_KEY"), env("RAKUTEN_REFERER"))
                    if env("RAKUTEN_APP_ID") and env("RAKUTEN_ACCESS_KEY") else None,
         "yahoo": YahooShopping(env("YAHOO_CLIENT_ID")) if env("YAHOO_CLIENT_ID") else None,
@@ -751,9 +816,12 @@ def main():
         history = {}  # デモデータは捨てて実データから数え直す
     for o in out_products:
         eb, jp, et = o["ebay"] or {}, o["jp"] or {}, o["etsy"] or {}
-        upsert(history.setdefault("products", {}).setdefault(o["id"], []), {
+        rows = history.setdefault("products", {}).setdefault(o["id"], [])
+        upsert(rows, {
             "d": today, "sell": eb.get("sell"), "ask": eb.get("ask"), "n": eb.get("n"),
             "s1": eb.get("s1"), "v1": eb.get("v1"), "jp": jp.get("p25"), "etsy": et.get("med")})
+        if eb.get("liq"):
+            eb["liq"]["days"] = len(rows)  # 何日分の記録から出した数字か
     if not args.only:
         for gid in genres:
             upsert(history.setdefault("genres", {}).setdefault(gid, []),

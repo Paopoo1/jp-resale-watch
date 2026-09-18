@@ -61,6 +61,7 @@ async function load() {
     renderMeta();
     renderGenres();
     render();
+    openFromHash();
   } catch (e) {
     view.innerHTML = `<div class="empty">データを読み込めませんでした。<br><small>${esc(e.message)}</small></div>`;
   } finally {
@@ -95,7 +96,37 @@ const inGenre = (g) => app.genre === 'all' || app.genre === g;
 const fxRate = () => (app.settings.fx_override > 0 ? app.settings.fx_override : app.data.fx.usdjpy);
 const histOf = (id) => app.history?.products?.[id] || [];
 const trackedDays = () => app.history?.fx?.length || 0;
-const sold7 = (id) => histOf(id).slice(-7).reduce((a, r) => a + (r.s1 || 0), 0);
+// 7日の販売数（複数個出品の販売＋終了した出品）。流動性の記録があればそちらを使う
+const sold7 = (id) => {
+  const liq = app.data.products.find((p) => p.id === id)?.ebay?.liq;
+  return liq ? liq.s7 : histOf(id).slice(-7).reduce((a, r) => a + (r.s1 || 0) + (r.v1 || 0), 0);
+};
+
+/** 流動性の目安。7日分たまるまでは「データ不足」。 */
+function liqRating(p) {
+  const l = p.ebay?.liq;
+  if (!l || (l.days ?? 0) < 7) return { key: 'wait', label: 'データ不足', note: `計測${l?.days ?? 0}日目・7日で判定` };
+  if ((l.str ?? 0) >= 0.5 || l.s30 >= 20) return { key: 'hot', label: 'よく売れる' };
+  if ((l.str ?? 0) >= 0.2 || l.s30 >= 5) return { key: 'ok', label: '普通' };
+  return { key: 'slow', label: '動きが遅い' };
+}
+const liqBadge = (p) => { const r = liqRating(p); return `<span class="liq liq-${r.key}" title="${esc(r.note || '')}">${r.label}</span>`; };
+const LIQ_ORDER = { hot: 3, ok: 2, wait: 1, slow: 0 };
+
+/** 一覧のカードに並べる流動性の数字。 */
+function liqStrip(p) {
+  const l = p.ebay?.liq;
+  if (!l) return '';
+  const cell = (label, value) => `<div><span>${label}</span><b>${value}</b></div>`;
+  return `<div class="liq-strip">
+    ${cell('30日で売れた', `${l.s30}個`)}
+    ${cell('売れる率', l.str != null && l.s30 ? pct(l.str) : '—')}
+    ${cell('はける日数', l.dos != null ? `${l.dos}日` : '—')}
+    ${cell('売れた日', `${l.d14}/14日`)}
+    ${cell('売れた値段', l.med != null ? usd(l.med) : '—')}
+    ${cell('売り手', `${l.sellers}人`)}
+  </div>`;
+}
 
 /** 1商品の利益計算。すべて「eBay で1個売ったら」の見込み。 */
 function calc(p) {
@@ -139,6 +170,7 @@ const soldLinks = (qEn, qJa) => [
   { short: 'ヤフオク落札', name: 'ヤフオク', sub: '落札相場', url: `https://auctions.yahoo.co.jp/closedsearch/closedsearch?p=${enc(qJa)}` },
   { short: 'eBay落札', name: 'eBay', sub: '売れた出品', url: `https://www.ebay.com/sch/i.html?_nkw=${enc(qEn)}&LH_Sold=1&LH_Complete=1` },
   { short: 'Etsy', name: 'Etsy', sub: '出品中', url: `https://www.etsy.com/search?q=${enc(qEn)}` },
+  { short: 'Terapeak', name: 'Terapeak', sub: 'eBay の販売履歴（要ログイン）', url: `https://www.ebay.com/sh/research?marketplace=EBAY-US&tabName=SOLD&keywords=${enc(qEn)}` },
 ];
 
 const linkButtons = (links) => links.map((l) => `<a class="link" href="${esc(l.url)}" title="${esc(l.name)}（${esc(l.sub)}）" target="_blank" rel="noopener">${esc(l.short)}</a>`).join('');
@@ -376,7 +408,7 @@ function renderProfit() {
   const key = {
     profit: (x) => x.c?.profit ?? -Infinity,
     margin: (x) => x.c?.margin ?? -Infinity,
-    sales: (x) => x.s7 * 1e7 + (x.p.ebay?.sold_total || 0) * 1e3 + (x.c?.profit ?? -1e6) / 1e3,
+    sales: (x) => LIQ_ORDER[liqRating(x.p).key] * 1e12 + (x.p.ebay?.liq?.s30 ?? x.s7) * 1e7 + (x.p.ebay?.sold_total || 0) * 1e3 + (x.c?.profit ?? -1e6) / 1e3,
   }[app.sort];
   items.sort((a, b) => key(b) - key(a));
   const shown = app.onlyProfit && !app.showAll ? items.filter((x) => x.c?.profit > 0) : items;
@@ -413,8 +445,8 @@ function productCard(p, c, s7) {
       : '<div class="rate">日本の価格なし</div>';
     line2 = `eBay ${usd(c.sell)}（${yen(c.salesJpy)}）· 仕入 ${yen(c.buy)}`;
   }
-  const hist = histOf(p.id).slice(-14).map((r) => r.s1 || 0);
-  const sales = trackedDays() >= 2 ? `7日で <b style="color:var(--ink)">${s7}</b>個売れた` : `出品 ${p.ebay?.n ?? 0}件`;
+  const hist = histOf(p.id).slice(-14).map((r) => (r.s1 || 0) + (r.v1 || 0));
+  const sales = `${liqBadge(p)}${trackedDays() >= 2 ? `7日で <b style="color:var(--ink)">${s7}</b>個` : `出品 ${p.ebay?.n ?? 0}件`}`;
   return `
     <div class="card">
       <button class="card-main" data-open="${esc(p.id)}">
@@ -423,6 +455,7 @@ function productCard(p, c, s7) {
         <div class="profit">${right}</div>
         <div class="line2">${line2}</div>
         <div class="line3">${sales}${spark(hist)}</div>
+        ${liqStrip(p)}
       </button>
       ${linkRow('日本で探す', buyLinks(p.q_ja))}
     </div>`;
@@ -551,6 +584,135 @@ function renderMarket() {
   }));
 }
 
+/* ================================================================ iPhone の通知 */
+
+// Railway で動かす通知サーバーの URL（push-server/）。空のあいだは通知の設定を出さない
+const PUSH_API = '';
+const PUSH_DEFAULTS = { minProfit: 10000, minMargin: 0.15, quiet: true };
+
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+function b64urlToBytes(s) {
+  const b = atob((s + '='.repeat((4 - (s.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
+}
+
+async function pushApi(path, body) {
+  const res = await fetch(PUSH_API + path, body
+    ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }
+    : undefined);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+  return json;
+}
+
+async function currentSubscription() {
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+function pushPrefsFromForm() {
+  const val = (id) => Number(document.getElementById(id)?.value);
+  const S = app.settings;
+  return {
+    minProfit: Number.isFinite(val('push-min-profit')) ? val('push-min-profit') : PUSH_DEFAULTS.minProfit,
+    minMargin: Number.isFinite(val('push-min-margin')) ? val('push-min-margin') / 100 : PUSH_DEFAULTS.minMargin,
+    quiet: document.getElementById('push-quiet')?.checked !== false,
+    // 利益の計算を画面と同じにするため、この端末の手数料・送料の設定も送る
+    settings: {
+      fee_rate: S.fee_rate, fixed_fee_usd: S.fixed_fee_usd, fx_loss_rate: S.fx_loss_rate,
+      other_cost_rate: S.other_cost_rate, domestic_ship_jpy: S.domestic_ship_jpy, ship_jpy: S.ship_jpy,
+      fx_override: S.fx_override,
+    },
+  };
+}
+
+async function renderPushPanel() {
+  const el = document.getElementById('push-panel');
+  if (!el) return;
+  const head = '<h3>iPhone の通知</h3><p class="panel-sub">毎朝のデータ更新のあと、条件に合う商品があれば通知します</p>';
+  if (!PUSH_API) {
+    el.innerHTML = `${head}<p class="note">通知サーバーの準備中です。</p>`;
+    return;
+  }
+  if (!pushSupported() || location.protocol !== 'https:') {
+    el.innerHTML = `${head}<p class="note">${isIOS && !isStandalone()
+      ? 'Safari の共有ボタンから「ホーム画面に追加」し、ホーム画面のアイコンから開くと通知を使えます（iOS 16.4 以降）。'
+      : 'このブラウザでは通知を使えません。'}</p>`;
+    return;
+  }
+  let sub = null;
+  let status = { subscribed: false, prefs: PUSH_DEFAULTS };
+  try {
+    sub = await currentSubscription();
+    if (sub) status = await pushApi(`/api/status?endpoint=${enc(sub.endpoint)}`);
+  } catch (e) {
+    el.innerHTML = `${head}<p class="note">通知サーバーにつながりません（${esc(e.message)}）。</p>`;
+    return;
+  }
+  const on = !!(sub && status.subscribed);
+  const P = { ...PUSH_DEFAULTS, ...status.prefs };
+  const blocked = Notification.permission === 'denied';
+  el.innerHTML = `${head}
+    <ul class="status-list"><li><span>状態</span><span class="${on ? 'ok' : 'ng'}">${on ? 'オン' : blocked ? 'ブロック中（iPhone の設定 → 通知 で許可）' : 'オフ'}</span></li></ul>
+    <div class="field"><label for="push-min-profit">最低の見込み利益</label><div class="inp"><input id="push-min-profit" type="number" inputmode="numeric" step="1000" value="${P.minProfit}"><span class="unit">円</span></div></div>
+    <div class="field"><label for="push-min-margin">最低の利益率</label><div class="inp"><input id="push-min-margin" type="number" inputmode="decimal" step="1" value="${Math.round(P.minMargin * 100)}"><span class="unit">%</span></div></div>
+    <label class="check"><input type="checkbox" id="push-quiet" ${P.quiet ? 'checked' : ''}>条件に合う商品が無い日は通知しない</label>
+    <div class="btn-row">
+      ${on
+        ? '<button class="btn" data-push="save">条件を保存</button><button class="btn" data-push="test">テスト通知</button><button class="btn" data-push="off">通知をオフ</button>'
+        : `<button class="btn btn-primary" data-push="on" ${blocked ? 'disabled' : ''}>通知をオンにする</button>`}
+    </div>
+    <p class="note" id="push-msg" style="margin:8px 0 0"></p>`;
+}
+
+async function onPushAction(action) {
+  const msg = (t) => { const m = document.getElementById('push-msg'); if (m) m.textContent = t; };
+  try {
+    if (action === 'on') {
+      // iPhone では、ボタンを押した流れの中で最初に許可を求める必要がある
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') throw new Error('通知が許可されませんでした');
+      const { publicKey } = await pushApi('/api/vapid');
+      const reg = await navigator.serviceWorker.ready;
+      const sub = (await reg.pushManager.getSubscription())
+        || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(publicKey) }));
+      await pushApi('/api/subscribe', { subscription: sub.toJSON(), prefs: pushPrefsFromForm() });
+      await renderPushPanel();
+      msg('通知をオンにしました。「テスト通知」で届くか確かめられます。');
+      return;
+    }
+    const sub = await currentSubscription();
+    if (!sub) throw new Error('この端末は登録されていません');
+    if (action === 'save') {
+      await pushApi('/api/prefs', { endpoint: sub.endpoint, prefs: pushPrefsFromForm() });
+      msg('条件を保存しました。');
+    } else if (action === 'test') {
+      msg('送信中…');
+      await pushApi('/api/test', { endpoint: sub.endpoint });
+      msg('テスト通知を送りました。数秒で届きます。');
+    } else if (action === 'off') {
+      await pushApi('/api/unsubscribe', { endpoint: sub.endpoint }).catch(() => {});
+      await sub.unsubscribe();
+      await renderPushPanel();
+      msg('通知をオフにしました。');
+    }
+  } catch (e) {
+    msg(`できませんでした: ${e.message}`);
+  }
+}
+
+/** 通知から開いたとき（#p=商品ID）はその商品の詳細を出す。 */
+function openFromHash() {
+  const m = location.hash.match(/^#p=(.+)$/);
+  if (!m || !app.data) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  openDetail(decodeURIComponent(m[1]));
+}
+window.addEventListener('hashchange', openFromHash);
+
 /* ================================================================ 画面: 設定 */
 
 function renderSettings() {
@@ -583,6 +745,8 @@ function renderSettings() {
       ${field('fx_override', 'ドル円レートを固定', '空欄なら毎朝の実レート', S.fx_override, '円')}
       <div style="margin-top:10px"><button class="btn" id="reset-settings">初期値に戻す</button></div>
     </section>
+
+    <section class="panel" id="push-panel"><h3>iPhone の通知</h3><p class="note">読み込み中…</p></section>
 
     <section class="panel">
       <h3>データの状態</h3>
@@ -620,6 +784,7 @@ function renderSettings() {
       <p>ホーム画面のアイコンから開くと、アプリと同じように全画面で使えます。</p>
     </section>
   `;
+  renderPushPanel();
 }
 
 function onSettingInput(e) {
@@ -637,6 +802,27 @@ function onSettingInput(e) {
 
 /* ================================================================ 詳細シート */
 
+function liquidityPanel(p) {
+  const l = p.ebay?.liq;
+  if (!l) return '';
+  const r = liqRating(p);
+  const row = (label, value, hint) => `<li><span>${label}${hint ? `<small class="hint-inline">${hint}</small>` : ''}</span><span>${value}</span></li>`;
+  return `<section class="panel">
+    <h3>流動性 ${liqBadge(p)}</h3>
+    <p class="panel-sub">eBay で日本から出ている出品（上位${l.tracked}件）を毎日追った記録。${r.note ? esc(r.note) : ''}</p>
+    <ul class="status-list">
+      ${row('30日の販売数', `${l.s30}個`, '複数個出品の販売＋終わった出品')}
+      ${row('売れる率', l.str != null ? pct(l.str) : '—', '売れた数 ÷（売れた数＋出品数）')}
+      ${row('在庫がはける日数', l.dos != null ? `${l.dos}日` : '—', '今の出品数 ÷ 1日の販売数')}
+      ${row('14日のうち売れた日', `${l.d14}日`)}
+      ${row('売れた値段の中央値', l.med != null ? `${usd(l.med)}（${l.cnt}件）` : '—')}
+      ${row('売り手の数', `${l.sellers}人`)}
+      ${row('計測日数', `${l.days ?? 0}日`)}
+    </ul>
+    <p class="note" style="margin:8px 0 0">「終わった出品」は売れた可能性が高いものの、出品者が取り下げた場合も含みます。仕入れ前は Terapeak（下のボタン）で実際の販売履歴も確かめてください。</p>
+  </section>`;
+}
+
 function openDetail(id) {
   const p = app.data.products.find((x) => x.id === id);
   if (!p) return;
@@ -647,7 +833,11 @@ function openDetail(id) {
 
   const receipt = c ? `
     <table class="receipt">
-      <tr><td>eBay 売値（送料込み）<span class="hint">${eb.sold_med != null ? '売れている出品の中央値' : '出品中の価格の中央値'} · ${usd(c.sell)} × ${fx.toFixed(1)}円</span></td><td>${yen(c.salesJpy)}</td></tr>
+      <tr><td>eBay 売値（送料込み）<span class="hint">${{
+        sold: `実際に売れた値段の中央値（${eb.liq?.cnt}件）`,
+        multi: '複数個売れている出品の価格の中央値',
+        ask: '出品中の価格の中央値（売れた記録がたまるまでの仮の値）',
+      }[eb.basis || (eb.sold_med != null ? 'multi' : 'ask')]} · ${usd(c.sell)} × ${fx.toFixed(1)}円</span></td><td>${yen(c.salesJpy)}</td></tr>
       <tr class="minus"><td>eBay 手数料<span class="hint">${+(S.fee_rate * 100).toFixed(2)}% ＋ $${Number(S.fixed_fee_usd).toFixed(2)}</span></td><td>${yen(-c.feeJpy)}</td></tr>
       ${c.otherJpy ? `<tr class="minus"><td>関税・その他<span class="hint">${+(S.other_cost_rate * 100).toFixed(2)}%</span></td><td>${yen(-c.otherJpy)}</td></tr>` : ''}
       <tr class="minus"><td>為替手数料<span class="hint">${+(S.fx_loss_rate * 100).toFixed(2)}%</span></td><td>${yen(-c.fxLossJpy)}</td></tr>
@@ -682,6 +872,8 @@ function openDetail(id) {
       </div>
 
       <section class="panel"><h3>利益の内訳</h3><p class="panel-sub">1個売れた場合の見込み</p>${receipt}</section>
+
+      ${liquidityPanel(p)}
 
       <section class="panel">
         <h3>価格の推移</h3>
@@ -774,6 +966,8 @@ view.addEventListener('click', (e) => {
   const hot = e.target.closest('[data-hot]');
   if (hot) { app.hotSource = hot.dataset.hot; store.set('hotSource', app.hotSource); return render(); }
   if (e.target.closest('[data-show-all]')) { app.showAll = true; return render(); }
+  const pushBtn = e.target.closest('[data-push]');
+  if (pushBtn) return onPushAction(pushBtn.dataset.push);
   if (e.target.id === 'reset-settings') {
     store.del('settings');
     app.settings = mergeSettings(app.data.settings);
@@ -792,7 +986,7 @@ view.addEventListener('change', (e) => {
 });
 
 view.addEventListener('input', (e) => {
-  if (app.tab === 'settings' && e.target.matches('input[type="number"]')) onSettingInput(e);
+  if (app.tab === 'settings' && e.target.matches('input[type="number"]') && !e.target.id.startsWith('push-')) onSettingInput(e);
 });
 
 sheet.addEventListener('click', (e) => {

@@ -1,5 +1,5 @@
 // 通信できるときは常に最新を取り、圏外では最後に見たデータを出す。
-const CACHE = 'ekkyo-v2';
+const CACHE = 'ekkyo-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'data/latest.json', 'data/history.json'];
 
 self.addEventListener('install', (e) => {
@@ -29,4 +29,36 @@ self.addEventListener('fetch', (e) => {
       })
       .catch(() => caches.match(e.request, { ignoreSearch: true })),
   );
+});
+
+// 通知サーバー（push-server/）から届いた通知を出す
+self.addEventListener('push', (e) => {
+  let d = {};
+  try {
+    d = e.data ? e.data.json() : {};
+  } catch {
+    d = { body: e.data ? e.data.text() : '' };
+  }
+  e.waitUntil(self.registration.showNotification(d.title || 'EXPORT RADAR', {
+    body: d.body || '',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: d.tag || 'export-radar',
+    data: { url: d.url || './' },
+  }));
+});
+
+// 通知をタップしたらアプリを開く（開いていれば前に出して、その商品へ移る）
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL(e.notification.data?.url || './', self.registration.scope).href;
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const win = wins.find((w) => w.url.startsWith(self.registration.scope));
+    if (win) {
+      await win.focus();
+      return win.navigate ? win.navigate(url) : undefined;
+    }
+    return self.clients.openWindow(url);
+  })());
 });
