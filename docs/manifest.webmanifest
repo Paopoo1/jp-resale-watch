@@ -1,6 +1,6 @@
 {
-  "name": "越境ウォッチ",
-  "short_name": "越境ウォッチ",
+  "name": "EXPORT RADAR SYSTEM",
+  "short_name": "Export Radar",
   "description": "eBay で売れている日本の品物と、日本での仕入れ値を毎日比べる",
   "lang": "ja",
   "start_url": "./",

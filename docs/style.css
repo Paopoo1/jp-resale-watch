@@ -95,7 +95,8 @@ a { color: inherit; }
   padding: calc(env(safe-area-inset-top) + 10px) 16px 0;
 }
 .top-row { display: flex; align-items: center; gap: 12px; max-width: 640px; margin: 0 auto; }
-.top h1 { font-size: 20px; font-weight: 700; margin: 0; letter-spacing: 0.02em; }
+.top h1 { font-size: 19px; font-weight: 800; margin: 0; letter-spacing: 0.06em; line-height: 1.05; white-space: nowrap; }
+.top h1 span { display: block; font-size: 9.5px; font-weight: 600; letter-spacing: 0.42em; color: var(--muted); margin-top: 3px; }
 .top .meta { margin: 0 0 0 auto; font-size: 12px; color: var(--ink-2); text-align: right; line-height: 1.35; }
 .icon-btn {
   border: 0; background: var(--surface-2); width: 34px; height: 34px; border-radius: 50%;
