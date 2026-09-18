@@ -130,8 +130,16 @@ function liqStrip(p) {
 
 /** 1商品の利益計算。すべて「eBay で1個売ったら」の見込み。 */
 function calc(p) {
+  // 同じ型番で比べた組があれば、その中央値（eBay で売れた値段と日本の同じ品物の最安）で計算する
+  const m = p.match;
+  const r = calcCore(m ? m.sell : p.ebay?.sell, m ? m.buy : (p.jp?.p25 ?? null), p.g);
+  if (r) r.basis = m ? 'match' : 'generic';
+  return r;
+}
+
+/** eBay の売値(USD)と日本の仕入れ値(円)から、1個売ったときの利益を出す。 */
+function calcCore(sell, buy, genre) {
   const S = app.settings, fx = fxRate();
-  const sell = p.ebay?.sell;
   if (sell == null) return null;
   const fee = sell * S.fee_rate + S.fixed_fee_usd;
   const other = sell * S.other_cost_rate;
@@ -143,9 +151,9 @@ function calc(p) {
     otherJpy: other * fx,
     fxLossJpy: net * fx * S.fx_loss_rate,
     receivedJpy: net * fx * (1 - S.fx_loss_rate),
-    ship: S.ship_jpy[p.g] ?? 3000,
+    ship: S.ship_jpy[genre] ?? 3000,
     domestic: S.domestic_ship_jpy,
-    buy: p.jp?.p25 ?? null,
+    buy,
     profit: null,
     margin: null,
   };
@@ -440,8 +448,11 @@ function productCard(p, c, s7) {
     right = '<div class="rate">eBay取得なし</div>';
     line2 = 'eBay の相場を取得できませんでした';
   } else {
+    const basis = c.basis === 'match'
+      ? `<span class="basis basis-match">型番一致 ${p.match.n}組</span>`
+      : '<span class="basis">目安</span>';
     right = c.profit != null
-      ? `<div class="amt ${c.profit >= 0 ? 'pos' : 'neg'}">${signedYen(c.profit)}</div><div class="rate">利益率 ${pct(c.margin)}</div>`
+      ? `<div class="amt ${c.profit >= 0 ? 'pos' : 'neg'}">${signedYen(c.profit)}</div><div class="rate">利益率 ${pct(c.margin)}</div>${basis}`
       : '<div class="rate">日本の価格なし</div>';
     line2 = `eBay ${usd(c.sell)}（${yen(c.salesJpy)}）· 仕入 ${yen(c.buy)}`;
   }
@@ -802,6 +813,38 @@ function onSettingInput(e) {
 
 /* ================================================================ 詳細シート */
 
+/** eBay で売れた出品と、日本で同じ型番・色のいちばん安い出品の組み合わせ。 */
+function pairsPanel(p) {
+  const pairs = p.pairs || [];
+  if (!pairs.length) {
+    return `<section class="panel"><h3>同じ型番で比べた組み合わせ</h3>
+      <p class="note" style="margin:0">売れた出品から型番が読み取れていないため、上の利益は「目安」です（型番の無い工芸品などはこうなります）。</p></section>`;
+  }
+  const colorJa = { black: 'ブラック', white: 'ホワイト', silver: 'シルバー', gold: 'ゴールド', red: 'レッド', blue: 'ブルー',
+    navy: 'ネイビー', green: 'グリーン', yellow: 'イエロー', pink: 'ピンク', purple: 'パープル', orange: 'オレンジ',
+    gray: 'グレー', grey: 'グレー', brown: 'ブラウン', beige: 'ベージュ', clear: 'クリア', khaki: 'カーキ', titanium: 'チタン' };
+  const rows = pairs.map((x) => {
+    const r = x.jp ? calcCore(x.p, x.jp.p, p.g) : null;
+    const tag = `型番 ${esc(x.k)}${x.c ? ` · ${colorJa[x.c] || esc(x.c)}` : ''}`;
+    return `<div class="pair">
+      <a class="row" href="${esc(x.u)}" target="_blank" rel="noopener">
+        <span class="t"><span class="src">eBay</span>${esc(x.t)}</span><span class="v">${usd(x.p)}</span>
+        <span class="s">${x.kind === 'sold' ? `この出品で ${x.s}個 売れた` : '出品が終わった（売れた可能性が高い）'} · ${tag}</span>
+      </a>
+      ${x.jp
+        ? `<a class="row" href="${esc(x.jp.u)}" target="_blank" rel="noopener">
+            <span class="t"><span class="src">${esc(x.jp.src)}</span>${esc(x.jp.t)}</span><span class="v">${yen(x.jp.p)}</span>
+            <span class="s">同じ型番 ${x.jp.n}件のうち最安${x.jp.shop ? ` · ${esc(x.jp.shop)}` : ''}</span>
+          </a>
+          <div class="pair-profit">この組の見込み利益 <b class="${r.profit >= 0 ? 'pos' : 'neg'}">${signedYen(r.profit)}</b>（${pct(r.margin)}）</div>`
+        : `<p class="note" style="margin:6px 0 4px">楽天・Yahoo!に同じ型番が見つかりませんでした。</p>
+          ${linkRow('日本で探す', buyLinks(x.k))}`}
+    </div>`;
+  }).join('');
+  return `<section class="panel"><h3>同じ型番で比べた組み合わせ</h3>
+    <p class="panel-sub">eBay で売れた出品と、日本で同じ型番・色のいちばん安い出品を1組ずつ比べています</p>${rows}</section>`;
+}
+
 function liquidityPanel(p) {
   const l = p.ebay?.liq;
   if (!l) return '';
@@ -833,16 +876,20 @@ function openDetail(id) {
 
   const receipt = c ? `
     <table class="receipt">
-      <tr><td>eBay 売値（送料込み）<span class="hint">${{
-        sold: `実際に売れた値段の中央値（${eb.liq?.cnt}件）`,
-        multi: '複数個売れている出品の価格の中央値',
-        ask: '出品中の価格の中央値（売れた記録がたまるまでの仮の値）',
-      }[eb.basis || (eb.sold_med != null ? 'multi' : 'ask')]} · ${usd(c.sell)} × ${fx.toFixed(1)}円</span></td><td>${yen(c.salesJpy)}</td></tr>
+      <tr><td>eBay 売値（送料込み）<span class="hint">${c.basis === 'match'
+        ? `同じ型番で比べた${p.match.n}組の、eBay で売れた値段の中央値`
+        : {
+          sold: `実際に売れた値段の中央値（${eb.liq?.cnt}件）`,
+          multi: '複数個売れている出品の価格の中央値',
+          ask: '出品中の価格の中央値（売れた記録がたまるまでの仮の値）',
+        }[eb.basis || (eb.sold_med != null ? 'multi' : 'ask')]} · ${usd(c.sell)} × ${fx.toFixed(1)}円</span></td><td>${yen(c.salesJpy)}</td></tr>
       <tr class="minus"><td>eBay 手数料<span class="hint">${+(S.fee_rate * 100).toFixed(2)}% ＋ $${Number(S.fixed_fee_usd).toFixed(2)}</span></td><td>${yen(-c.feeJpy)}</td></tr>
       ${c.otherJpy ? `<tr class="minus"><td>関税・その他<span class="hint">${+(S.other_cost_rate * 100).toFixed(2)}%</span></td><td>${yen(-c.otherJpy)}</td></tr>` : ''}
       <tr class="minus"><td>為替手数料<span class="hint">${+(S.fx_loss_rate * 100).toFixed(2)}%</span></td><td>${yen(-c.fxLossJpy)}</td></tr>
       <tr class="minus"><td>国際送料<span class="hint">${esc(genreName(p.g))}の目安（設定で変更）</span></td><td>${yen(-c.ship)}</td></tr>
-      <tr class="minus"><td>仕入れ値<span class="hint">${jp ? `楽天・Yahoo!の${jp.n}件のうち安い方から25%` : '日本の価格が見つかりませんでした'}</span></td><td>${c.buy != null ? yen(-c.buy) : '—'}</td></tr>
+      <tr class="minus"><td>仕入れ値<span class="hint">${c.basis === 'match'
+        ? `同じ型番・色の日本最安（${p.match.n}組の中央値）`
+        : jp ? `楽天・Yahoo!の${jp.n}件のうち安い方から25%（同じ品物かは未確認の目安）` : '日本の価格が見つかりませんでした'}</span></td><td>${c.buy != null ? yen(-c.buy) : '—'}</td></tr>
       <tr class="minus"><td>国内送料</td><td>${yen(-c.domestic)}</td></tr>
       <tr class="total"><td>見込み利益</td><td class="${c.profit > 0 ? 'pos' : c.profit < 0 ? 'neg' : ''}">${signedYen(c.profit)}</td></tr>
     </table>` : '<p class="note">eBay の相場を取得できなかったため計算できません。</p>';
@@ -872,6 +919,8 @@ function openDetail(id) {
       </div>
 
       <section class="panel"><h3>利益の内訳</h3><p class="panel-sub">1個売れた場合の見込み</p>${receipt}</section>
+
+      ${pairsPanel(p)}
 
       ${liquidityPanel(p)}
 

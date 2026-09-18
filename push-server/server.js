@@ -64,8 +64,9 @@ const yen = (v) => `${v < 0 ? '−' : '+'}¥${Math.abs(Math.round(v)).toLocaleSt
 
 /** アプリと同じ計算で、1個売ったときの見込み利益を出す。 */
 function profitOf(p, S, fx) {
-  const sell = p.ebay?.sell;
-  const buy = p.jp?.p25;
+  // 同じ型番で比べた組があればそれを使う（アプリの表示と同じ）
+  const sell = p.match ? p.match.sell : p.ebay?.sell;
+  const buy = p.match ? p.match.buy : p.jp?.p25;
   if (sell == null || buy == null) return null;
   const fee = sell * S.fee_rate + S.fixed_fee_usd;
   const net = (sell - fee - sell * S.other_cost_rate) * fx * (1 - S.fx_loss_rate);
@@ -86,7 +87,7 @@ function buildMessage(data, sub, { test = false } = {}) {
   const sold = data.products.reduce((a, p) => a + (p.ebay?.s1 || 0), 0);
 
   if (!hits.length && prefs.quiet && !test) return null;
-  const lines = hits.slice(0, 3).map(({ p, r }) => `${p.name} ${yen(r.profit)}（${Math.round(r.margin * 100)}%）`);
+  const lines = hits.slice(0, 3).map(({ p, r }) => `${p.name} ${yen(r.profit)}（${Math.round(r.margin * 100)}%${p.match ? '・型番一致' : ''}）`);
   if (hits.length > 3) lines.push(`ほか ${hits.length - 3} 件`);
   if (!hits.length) lines.push(`条件（${yen(prefs.minProfit)}以上・${Math.round(prefs.minMargin * 100)}%以上）に合う商品はありませんでした`);
   if (sold) lines.push(`昨日 eBay で売れた数: ${sold}個`);

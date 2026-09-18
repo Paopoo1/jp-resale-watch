@@ -93,10 +93,13 @@ def norm(text):
 
 def has_token(title, token):
     t = norm(token)
-    if t.isdigit() or len(t) <= 2:
-        # 「67」が「15670」の一部に当たらないよう、前後に英数字が続かないことを確かめる
+    if re.search(r"\d", t) or len(t) <= 2:
+        # 型番のように数字を含む語は、前後に英数字が続かないことを確かめる
+        # （「67」が「15670」に、「FM2」が「ワイドFM 25W」に当たらないように）
         loose = unicodedata.normalize("NFKC", title or "").lower()
-        pat = r"(?<![0-9a-z])" + r"[\s\-_・/]*".join(map(re.escape, t)) + r"(?![0-9a-z])"
+        # 数字で始まる語（50mm、1.4）は「F1.4」のように前に英字が付いてもよい
+        before = r"(?<![0-9.])" if t[0].isdigit() else r"(?<![0-9a-z])"
+        pat = before + r"[\s\-_・/]*".join(map(re.escape, t)) + r"(?![0-9a-z])"
         return re.search(pat, loose) is not None
     return t in norm(title)
 
@@ -161,6 +164,7 @@ class Ebay:
             "X-EBAY-C-ENDUSERCTX": "contextualLocation=country%3DUS%2Czip%3D10001",
         }
         self.calls = 0
+        self.batch_ok = True
         self._lock = threading.Lock()
 
     def _get(self, path):
@@ -198,6 +202,22 @@ class Ebay:
             raise
 
     def details(self, ids):
+        """出品の詳細。20件ずつまとめて取り（1日の呼び出し上限の節約）、取れなかった分だけ1件ずつ取る。"""
+        ids = list(dict.fromkeys(ids))
+        out = {}
+        if self.batch_ok:
+            for i in range(0, len(ids), 20):
+                chunk = ids[i:i + 20]
+                try:
+                    res = self._get("/buy/browse/v1/item/?item_ids=" + ",".join(urllib.parse.quote(x, safe="") for x in chunk))
+                except ApiError as e:
+                    log(f"    まとめて取得できないので1件ずつ取ります: {e}")
+                    self.batch_ok = False
+                    break
+                for it in res.get("items") or []:
+                    if it.get("itemId") in chunk:
+                        out[it["itemId"]] = it
+
         def one(iid):
             try:
                 return iid, self.item(iid)
@@ -205,8 +225,10 @@ class Ebay:
                 log(f"    getItem {iid} 失敗: {e}")
                 return iid, None
 
+        rest = [x for x in ids if x not in out]  # 終わった出品やバリエーション出品など
         with ThreadPoolExecutor(max_workers=4) as pool:
-            return dict(pool.map(one, ids))
+            out.update(dict(pool.map(one, rest)))
+        return out
 
 
 def usd(amount):
@@ -244,6 +266,51 @@ def listing_from_summary(s):
     }
 
 
+# ---------------------------------------------------------------- 同じ品物を日本で探すための手がかり
+
+COLORS = {  # 英語の色 → 日本の出品タイトルでよく使う書き方
+    "black": ["ブラック", "黒"], "white": ["ホワイト", "白"], "silver": ["シルバー", "銀"], "gold": ["ゴールド", "金"],
+    "red": ["レッド", "赤"], "blue": ["ブルー", "青"], "navy": ["ネイビー", "紺"], "green": ["グリーン", "緑"],
+    "yellow": ["イエロー", "黄"], "pink": ["ピンク"], "purple": ["パープル", "紫"], "orange": ["オレンジ"],
+    "gray": ["グレー", "灰"], "grey": ["グレー", "灰"], "brown": ["ブラウン", "茶"], "beige": ["ベージュ"],
+    "clear": ["クリア"], "khaki": ["カーキ"], "titanium": ["チタン"],
+}
+GENERIC_MPN = {"doesnotapply", "na", "n/a", "none", "unbranded", "notapplicable", "unknown", "doesntapply", "-"}
+MODEL_RE = re.compile(r"(?<![A-Za-z0-9])(?=[A-Za-z0-9-]*\d)(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
+NOT_MODEL_RE = re.compile(r"^(\d+(mm|cm|ml|g|kg|s|th|st|nd|rd|pcs?|x)|f\d.*|s/?n.*|no\d+|exc\d*|\d+x\d+)$", re.I)
+
+
+def model_of(title, detail):
+    """出品の型番。eBay の「MPN / Model」欄を優先し、無ければタイトルの英数字の並びから拾う。"""
+    aspects = {a.get("name", "").lower(): a.get("value", "") for a in (detail or {}).get("localizedAspects") or []}
+    for v in ((detail or {}).get("mpn"), aspects.get("mpn"), aspects.get("model"), aspects.get("reference number"),
+              aspects.get("model number")):
+        v = (v or "").split(",")[0].strip()
+        if " " in v:  # 「Nikon FM2」のようにブランド込みなら、数字を含む部分だけにする
+            v = next((w for w in v.split() if re.search(r"\d", w)), v)
+        if v and norm(v) not in GENERIC_MPN and re.search(r"\d", v) and re.search(r"[A-Za-z]", v) and len(v) <= 30:
+            return v
+    tokens = [t for t in MODEL_RE.findall(title or "") if len(norm(t)) >= 4 and not NOT_MODEL_RE.match(t)]
+    return max(tokens, key=lambda t: len(norm(t))) if tokens else None
+
+
+def color_of(detail):
+    aspects = {a.get("name", "").lower(): a.get("value", "") for a in (detail or {}).get("localizedAspects") or []}
+    raw = ((detail or {}).get("color") or aspects.get("color") or aspects.get("dial color") or "").lower()
+    return next((c for c in COLORS if re.search(rf"\b{c}\b", raw)), None)
+
+
+def other_color(title, color):
+    """日本の出品が、指定と違う色だとはっきり書いているか。"""
+    if not color:
+        return False
+    t = unicodedata.normalize("NFKC", title or "")
+    mine = COLORS[color]
+    if any(w in t for w in mine):
+        return False
+    return any(w in t for c, words in COLORS.items() if words != mine for w in words if len(w) > 1)
+
+
 # ---------------------------------------------------------------- 販売数の追跡
 
 class Tracker:
@@ -262,7 +329,7 @@ class Tracker:
         if e["d"] != self.today:
             e["ps"], e["d"] = e["s"], self.today
 
-    def observe(self, item_id, sold, genre, product=None, in_search=True, price=None, seller=None):
+    def observe(self, item_id, sold, genre, product=None, in_search=True, price=None, seller=None, ident=None):
         e = self.items.get(item_id)
         if e is None:
             e = self.items[item_id] = {"g": genre, "s": sold, "ps": None, "d": self.today}
@@ -278,6 +345,8 @@ class Tracker:
             e["pr"] = price
         if seller:
             e["sl"] = seller
+        if ident:
+            e.update(ident)  # 終わった出品でも日本の同じ品物を探せるよう、型番・色・タイトルを残す
         return e
 
     def sales_today(self, match):
@@ -318,7 +387,7 @@ class Tracker:
 
     def prune(self):
         keep_since = days_ago(self.today, STATE_KEEP_DAYS)
-        gone_since = days_ago(self.today, 2)
+        gone_since = days_ago(self.today, 7)  # 終わった出品は1週間、日本の同じ品物探しに使う
         for iid in [iid for iid, e in self.items.items()
                     if e["d"] < keep_since or e.get("gone", "9999") < gone_since]:
             del self.items[iid]
@@ -459,6 +528,76 @@ def etsy_listing(r, fx):
             "qty": r.get("quantity"), "fav": r.get("num_favorers") or 0, "u": r.get("url")}
 
 
+# ---------------------------------------------------------------- 売れた出品と日本の同じ品物
+
+MAX_PAIRS = 4
+
+
+def has_model(title, model):
+    """型番が、前後に英数字が続かない形でタイトルに入っているか（DW-5600 が DW-5600BB に当たらない）。"""
+    t = norm(model)
+    loose = unicodedata.normalize("NFKC", title or "").lower()
+    pat = r"(?<![0-9a-z])" + r"[\s\-_・/]*".join(map(re.escape, t)) + r"(?![0-9a-z])"
+    return re.search(pat, loose) is not None
+
+
+def find_same_in_japan(ctx, c, exclude):
+    """売れた eBay 出品 c と同じ型番（と色）の、日本でいちばん安い出品。"""
+    floor = round(c["p"] * ctx["fx"] * ctx["settings"].get("jp_floor_ratio", 0.2))
+    cache = ctx["state"].setdefault("jpmatch", {})
+    key = f"{norm(c['k'])}|{c.get('c') or ''}|{floor // 1000}"
+    if key in cache and cache[key]["d"] >= days_ago(ctx["today"], 1):
+        return cache[key]["jp"]
+
+    colors = COLORS.get(c.get("c") or "", [])
+    queries = [f"{c['k']} {colors[0]}", c["k"]] if colors else [c["k"]]
+    best = None
+    for q in queries:
+        found = []
+        for name, client in (("楽天", ctx["rakuten"]), ("Yahoo!", ctx["yahoo"])):
+            if not client:
+                continue
+            try:
+                found += client.search(q, floor) if name == "楽天" else client.search(q, floor, "any")
+            except ApiError as e:
+                log(f"      {name}「{q}」失敗: {e}")
+        hits = [x for x in found if x["p"] >= floor and has_model(x["t"], c["k"])
+                and not other_color(x["t"], c.get("c")) and title_ok(x["t"], [], exclude)]
+        if hits:
+            x = min(hits, key=lambda h: h["p"])
+            best = {k: x.get(k) for k in ("t", "p", "u", "src", "shop")} | {"n": len(hits), "q": q}
+            break
+    cache[key] = {"d": ctx["today"], "jp": best}
+    return best
+
+
+def pair_with_japan(ctx, tracked, pid, exclude):
+    """今日売れている出品と、この1週間に終わった出品のうち、型番がわかるものを日本と組み合わせる。"""
+    cands = [{"t": x["t"], "p": x["p"], "s": x["s"], "u": x["u"], "i": x.get("i"), "k": x["k"], "c": x.get("c"), "kind": "sold"}
+             for x in tracked if x.get("s", 0) > 0 and x.get("k")]
+    cands += [{"t": e.get("t", ""), "p": e["pr"], "s": 1, "u": e.get("u"), "i": None, "k": e["k"], "c": e.get("c"), "kind": "ended"}
+              for e in ctx["tracker"].items.values()
+              if e.get("p") == pid and e.get("gone") and e.get("k") and e.get("pr")]
+    cands.sort(key=lambda c: (-c["s"], c["kind"] != "sold"))
+    pairs, seen = [], set()
+    for c in cands:
+        key = (norm(c["k"]), c.get("c"))
+        if key in seen:
+            continue
+        seen.add(key)
+        c["jp"] = find_same_in_japan(ctx, c, exclude)
+        pairs.append(c)
+        if len(pairs) >= MAX_PAIRS:
+            break
+    return pairs
+
+
+def prune_jpmatch(state, today):
+    cache = state.get("jpmatch", {})
+    for k in [k for k, v in cache.items() if v["d"] < days_ago(today, 3)]:
+        del cache[k]
+
+
 # ---------------------------------------------------------------- 1商品の処理
 
 def process_product(p, genre, ctx):
@@ -470,7 +609,7 @@ def process_product(p, genre, ctx):
     min_usd, min_jpy = p.get("min_usd", 0), p.get("min_jpy", 0)
     cond = p.get("cond", "any")
     out = {"id": p["id"], "g": p["g"], "name": p["name"], "q_en": p["q_en"], "q_ja": p["q_ja"],
-           "img": None, "ebay": None, "jp": None, "etsy": None, "errors": []}
+           "img": None, "ebay": None, "jp": None, "etsy": None, "pairs": [], "match": None, "errors": []}
 
     # eBay: 価格と販売数
     try:
@@ -483,7 +622,9 @@ def process_product(p, genre, ctx):
             d = details.get(x["id"])
             if isinstance(d, dict):
                 x["s"] = sold_quantity(d)
-                tracker.observe(x["id"], x["s"], p["g"], p["id"], price=x["p"], seller=x.get("sl"))
+                x["k"], x["c"] = model_of(x["t"], d), color_of(d)
+                ident = {"t": x["t"][:90], "u": x["u"], "k": x["k"], "c": x["c"]}
+                tracker.observe(x["id"], x["s"], p["g"], p["id"], price=x["p"], seller=x.get("sl"), ident=ident)
         rechecked = recheck(ebay, tracker, lambda e: e.get("p") == p["id"], p["g"], p["id"])
 
         # 売れた記録を貯める（同じ日に再実行したら今日の分は入れ直す）
@@ -513,6 +654,14 @@ def process_product(p, genre, ctx):
             "top": [{k: x.get(k) for k in ("t", "p", "s", "u", "i")} for x in top],
         }
         log(f"    eBay {len(listings)}件 / 売値 ${sell}（{basis}）/ 30日 {liq['s30']}個 / 本日販売 {agg['s1']} / 終了 {agg['v1']} (再確認 {rechecked})")
+
+        # 売れた出品と同じ型番・色の品物を日本で探して、1組ずつ比べる
+        if ctx["rakuten"] or ctx["yahoo"]:
+            out["pairs"] = pair_with_japan(ctx, tracked, p["id"], exclude_ja)
+            matched = [x for x in out["pairs"] if x["jp"]]
+            out["match"] = {"n": len(matched), "sell": median([x["p"] for x in matched]),
+                            "buy": median([x["jp"]["p"] for x in matched])} if matched else None
+            log(f"    型番一致 {len(matched)}/{len(out['pairs'])}組")
     except ApiError as e:
         out["errors"].append(f"eBay: {e}")
         log(f"    eBay 失敗: {e}")
@@ -856,6 +1005,7 @@ def main():
     write_json(DATA_DIR / "history.json", history)
     tracker.prune()
     prune_etsy(state, today)
+    prune_jpmatch(state, today)
     write_json(STATE_PATH, state)
     log("保存しました。")
     return 0
