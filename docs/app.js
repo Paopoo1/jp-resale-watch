@@ -598,7 +598,7 @@ function renderMarket() {
 /* ================================================================ iPhone の通知 */
 
 // Railway で動かす通知サーバーの URL（push-server/）。空のあいだは通知の設定を出さない
-const PUSH_API = '';
+const PUSH_API = 'https://jp-resale-watch-production.up.railway.app';
 const PUSH_DEFAULTS = { minProfit: 10000, minMargin: 0.15, quiet: true };
 
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);

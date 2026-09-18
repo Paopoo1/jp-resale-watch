@@ -203,7 +203,7 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && url.pathname === '/') {
-      return reply(res, 200, { app: 'EXPORT RADAR push', subscribers: Object.keys(state.subs).length, lastGenerated: state.lastGenerated }, origin);
+      return reply(res, 200, { app: 'EXPORT RADAR push', subscribers: Object.keys(state.subs).length, lastGenerated: state.lastGenerated, volume: !!process.env.RAILWAY_VOLUME_MOUNT_PATH }, origin);
     }
     if (req.method === 'GET' && url.pathname === '/api/vapid') {
       return reply(res, 200, { publicKey: state.vapid.publicKey }, origin);
