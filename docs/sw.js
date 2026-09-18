@@ -1,4 +1,4 @@
-﻿// 通信できるときは常に最新を取り、圏外では最後に見たデータを出す。
+// 通信できるときは常に最新を取り、圏外では最後に見たデータを出す。
 const CACHE = 'ekkyo-v2';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'data/latest.json', 'data/history.json'];
 

@@ -22,6 +22,7 @@ import base64
 import html
 import json
 import os
+import re
 import statistics
 import sys
 import threading
@@ -630,6 +631,31 @@ def upsert(rows, row):
     del rows[:-HISTORY_DAYS]
 
 
+def ebay_key_hint(client_id, secret):
+    """キーの値は出さずに、どの種類のキーが入っているかだけを出す。"""
+    def kind(v):
+        if "-PRD-" in v or v.startswith("PRD-"):
+            return "Production 用"
+        if "-SBX-" in v or v.startswith("SBX-"):
+            return "Sandbox 用"
+        if re.fullmatch(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", v):
+            return "Dev ID と同じ形"
+        return "見慣れない形"
+
+    log(f"  EBAY_CLIENT_ID: {kind(client_id)}（{len(client_id)}文字）")
+    log(f"  EBAY_CLIENT_SECRET: {kind(secret)}（{len(secret)}文字）")
+    basic = base64.b64encode(f"{client_id}:{secret}".encode()).decode()
+    body = urllib.parse.urlencode({"grant_type": "client_credentials",
+                                   "scope": "https://api.ebay.com/oauth/api_scope"}).encode()
+    try:
+        http_json("https://api.sandbox.ebay.com/identity/v1/oauth2/token",
+                  {"Authorization": f"Basic {basic}", "Content-Type": "application/x-www-form-urlencoded"},
+                  data=body, retries=1)
+        log("  Sandbox では認証が通りました → Production のキーに入れ替えてください")
+    except ApiError as e:
+        log(f"  Sandbox でも認証できません（HTTP {e.status}）")
+
+
 def check_sources(ctx, fx):
     """eBay 以外のキーが通るかを1回ずつ試して結果だけ出す（キーの値は出さない）。"""
     tests = [
@@ -689,6 +715,7 @@ def main():
         if e.status in (400, 401):
             log("  → App ID と Cert ID の入れ違い、Sandbox 用のキー（-SBX-）、"
                 "Production キーが無効（Marketplace Account Deletion 未設定）のどれかの可能性が高いです。")
+            ebay_key_hint(env("EBAY_CLIENT_ID"), env("EBAY_CLIENT_SECRET"))
         check_sources(ctx, fx)
         return 1
     if args.check:
