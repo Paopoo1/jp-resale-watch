@@ -623,14 +623,35 @@ def upsert(rows, row):
     del rows[:-HISTORY_DAYS]
 
 
+def check_sources(ctx, fx):
+    """eBay 以外のキーが通るかを1回ずつ試して結果だけ出す（キーの値は出さない）。"""
+    tests = [
+        ("楽天", ctx["rakuten"], lambda c: c.search("ニコン FM2", 0)),
+        ("Yahoo!", ctx["yahoo"], lambda c: c.search("ニコン FM2", 0, "any")),
+        ("Etsy", ctx["etsy"], lambda c: c.search("kokeshi", fx)),
+    ]
+    for name, client, run in tests:
+        if not client:
+            log(f"キー確認 {name}: 未設定")
+            continue
+        try:
+            log(f"キー確認 {name}: OK（{len(run(client))}件）")
+        except ApiError as e:
+            log(f"キー確認 {name}: NG {e}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", nargs="*", help="この商品IDだけ処理する")
     ap.add_argument("--no-discovery", action="store_true", help="売れ筋の検索を省く")
     ap.add_argument("--dry-run", action="store_true", help="ファイルに保存しない")
+    ap.add_argument("--check", action="store_true", help="各 API のキーが通るかだけ確かめる")
     args = ap.parse_args()
 
-    env = os.environ.get
+    def env(key):
+        # Secrets に貼るときに紛れ込んだ前後の空白・改行は取り除く
+        return (os.environ.get(key) or "").strip() or None
+
     if not (env("EBAY_CLIENT_ID") and env("EBAY_CLIENT_SECRET")):
         log("EBAY_CLIENT_ID と EBAY_CLIENT_SECRET を設定してください（README の手順 1）。")
         return 2
@@ -646,12 +667,24 @@ def main():
 
     ctx = {
         "today": today, "fx": fx, "state": state, "tracker": Tracker(state, today),
-        "ebay": Ebay(env("EBAY_CLIENT_ID"), env("EBAY_CLIENT_SECRET")),
         "rakuten": Rakuten(env("RAKUTEN_APP_ID"), env("RAKUTEN_ACCESS_KEY"), env("RAKUTEN_REFERER"))
                    if env("RAKUTEN_APP_ID") and env("RAKUTEN_ACCESS_KEY") else None,
         "yahoo": YahooShopping(env("YAHOO_CLIENT_ID")) if env("YAHOO_CLIENT_ID") else None,
         "etsy": Etsy(env("ETSY_API_KEY")) if env("ETSY_API_KEY") else None,
     }
+    try:
+        ctx["ebay"] = Ebay(env("EBAY_CLIENT_ID"), env("EBAY_CLIENT_SECRET"))
+        log("キー確認 eBay: OK")
+    except ApiError as e:
+        log(f"キー確認 eBay: NG {e}")
+        if e.status in (400, 401):
+            log("  → App ID と Cert ID の入れ違い、Sandbox 用のキー（-SBX-）、"
+                "Production キーが無効（Marketplace Account Deletion 未設定）のどれかの可能性が高いです。")
+        check_sources(ctx, fx)
+        return 1
+    if args.check:
+        check_sources(ctx, fx)
+        return 0
     if not (ctx["rakuten"] or ctx["yahoo"]):
         log("注意: 楽天・Yahoo!のキーが無いため、日本側の価格は取得しません。")
 
