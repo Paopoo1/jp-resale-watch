@@ -8,7 +8,7 @@
     "other_cost_rate": 0.0,
     "domestic_ship_jpy": 800,
     "fx_fallback": 150,
-    "ship_jpy": { "camera": 3500, "craft": 4500, "hobby": 3000, "fashion": 2500 },
+    "ship_jpy": { "camera": 3500, "craft": 4500, "hobby": 3000, "fashion": 2500, "souvenir": 1500 },
     "jp_floor_ratio": 0.3
   },
 
@@ -32,7 +32,12 @@
       "exclude_en": ["band only", "strap only", "parts", "not working", "junk", "box only", "fake", "band", "strap", "bezel", "protector", "compatible", "replacement"],
       "exclude_ja": ["ジャンク", "ベルトのみ", "部品", "箱のみ", "訳あり", "バンド", "ベルト", "互換", "ベゼル", "保護", "フィルム", "カバー", "ケース", "ポーチのみ", "コンパチブル"],
       "discovery": [ { "q": "seiko", "min_usd": 50 }, { "q": "issey miyake", "min_usd": 40 }, { "q": "kimono", "min_usd": 30 } ],
-      "etsy_discovery": [ { "q": "vintage kimono", "min_usd": 30 }, { "q": "haori", "min_usd": 30 }, { "q": "obi", "min_usd": 25 } ] }
+      "etsy_discovery": [ { "q": "vintage kimono", "min_usd": 30 }, { "q": "haori", "min_usd": 30 }, { "q": "obi", "min_usd": 25 } ] },
+    { "id": "souvenir", "name": "京都みやげ・雑貨",
+      "exclude_en": ["electric", "usb", "replica", "sticker", "keychain", "magnet", "digital", "template", "printable"],
+      "exclude_ja": ["扇風機", "USB", "シール", "ステッカー", "キーホルダー", "マグネット", "ダウンロード", "印刷用"],
+      "discovery": [ { "q": "japanese souvenir", "min_usd": 12 }, { "q": "japanese fan sensu", "min_usd": 12 }, { "q": "japanese snack", "min_usd": 12 } ],
+      "etsy_discovery": [ { "q": "japanese fan", "min_usd": 12 }, { "q": "furoshiki", "min_usd": 12 }, { "q": "goshuincho", "min_usd": 15 } ] }
   ],
 
   "products": [
@@ -69,6 +74,17 @@
     { "id": "porter-tanker", "g": "fashion", "name": "ポーター タンカー", "q_en": "Porter Yoshida Tanker", "q_ja": "吉田カバン ポーター タンカー", "must_en": ["porter", "tanker"], "must_ja": ["タンカー"], "cond": "any", "min_usd": 60, "min_jpy": 8000 },
     { "id": "pleats-please", "g": "fashion", "name": "プリーツプリーズ", "q_en": "Pleats Please Issey Miyake", "q_ja": "プリーツプリーズ イッセイミヤケ", "must_en": ["pleats please"], "must_ja": ["プリーツプリーズ"], "cond": "used", "min_usd": 40, "min_jpy": 3000 },
     { "id": "baobao", "g": "fashion", "name": "バオバオ イッセイミヤケ", "q_en": "Bao Bao Issey Miyake bag", "q_ja": "BAO BAO イッセイミヤケ", "must": ["bao bao"], "cond": "used", "min_usd": 60, "min_jpy": 5000 },
-    { "id": "kapital-denim", "g": "fashion", "name": "キャピタル デニム", "q_en": "Kapital denim", "q_ja": "KAPITAL デニム", "must": ["kapital"], "cond": "used", "min_usd": 60, "min_jpy": 5000 }
+    { "id": "kapital-denim", "g": "fashion", "name": "キャピタル デニム", "q_en": "Kapital denim", "q_ja": "KAPITAL デニム", "must": ["kapital"], "cond": "used", "min_usd": 60, "min_jpy": 5000 },
+
+    { "id": "goshuincho", "g": "souvenir", "name": "御朱印帳", "q_en": "goshuincho stamp book", "q_ja": "御朱印帳", "must_en": ["goshuincho"], "must_ja": ["御朱印帳"], "cond": "any", "min_usd": 18, "min_jpy": 1000 },
+    { "id": "sensu-fan", "g": "souvenir", "name": "扇子", "q_en": "japanese folding fan sensu", "q_ja": "扇子", "must_en": ["sensu"], "must_ja": ["扇子"], "cond": "any", "min_usd": 12, "min_jpy": 800 },
+    { "id": "furoshiki", "g": "souvenir", "name": "風呂敷", "q_en": "furoshiki wrapping cloth", "q_ja": "風呂敷", "must_en": ["furoshiki"], "must_ja": ["風呂敷"], "cond": "any", "min_usd": 12, "min_jpy": 700 },
+    { "id": "tenugui", "g": "souvenir", "name": "手ぬぐい", "q_en": "tenugui japanese towel", "q_ja": "手ぬぐい", "must_en": ["tenugui"], "must_ja": ["手ぬぐい"], "cond": "any", "min_usd": 10, "min_jpy": 500 },
+    { "id": "maneki-neko", "g": "souvenir", "name": "招き猫", "q_en": "maneki neko lucky cat", "q_ja": "招き猫", "must_en": ["maneki"], "must_ja": ["招き猫"], "cond": "any", "min_usd": 15, "min_jpy": 900 },
+    { "id": "furin", "g": "souvenir", "name": "風鈴", "q_en": "japanese wind chime furin", "q_ja": "風鈴", "must_en": ["furin"], "must_ja": ["風鈴"], "cond": "any", "min_usd": 15, "min_jpy": 900 },
+    { "id": "okou-incense", "g": "souvenir", "name": "お香", "q_en": "japanese incense sticks", "q_ja": "お香 スティック", "must_en": ["incense"], "must_ja": ["お香"], "exclude": ["ホルダー", "立て", "burner", "holder"], "cond": "any", "min_usd": 12, "min_jpy": 600 },
+    { "id": "kendama", "g": "souvenir", "name": "けん玉", "q_en": "kendama japanese", "q_ja": "けん玉", "must_en": ["kendama"], "must_ja": ["けん玉"], "cond": "any", "min_usd": 18, "min_jpy": 1200 },
+    { "id": "matcha", "g": "souvenir", "name": "抹茶（粉末）", "q_en": "matcha green tea powder japan", "q_ja": "抹茶 粉末", "must_en": ["matcha"], "must_ja": ["抹茶"], "exclude": ["latte", "ラテ", "お菓子", "kit kat"], "cond": "new", "min_usd": 12, "min_jpy": 600 },
+    { "id": "kitkat-matcha", "g": "souvenir", "name": "キットカット 抹茶", "q_en": "kit kat japanese matcha", "q_ja": "キットカット 抹茶", "must_en": ["kit kat"], "must_ja": ["キットカット"], "cond": "new", "min_usd": 10, "min_jpy": 500 }
   ]
 }
