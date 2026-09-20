@@ -44,8 +44,8 @@ JST = timezone(timedelta(hours=9))
 HISTORY_DAYS = 180
 STATE_KEEP_DAYS = 14
 RECHECK_DAYS = 7              # 検索に出なくなった出品を何日間追いかけるか
-MAX_TRACK_PER_PRODUCT = 50    # 1商品あたり販売数を調べる出品数
-MAX_TRACK_PER_QUERY = 40      # 売れ筋検索1クエリあたり
+MAX_TRACK_PER_PRODUCT = 30    # 1商品あたり販売数を調べる出品数（eBay の1日の上限内に収める）
+MAX_TRACK_PER_QUERY = 25      # 売れ筋検索1クエリあたり
 DISCOVERY_TOP = 20
 USER_AGENT = "jp-resale-watch/1.0"
 GONE = "GONE"                 # eBay 上で出品が終了している
@@ -276,6 +276,17 @@ COLORS = {  # 英語の色 → 日本の出品タイトルでよく使う書き�
     "clear": ["クリア"], "khaki": ["カーキ"], "titanium": ["チタン"],
 }
 GENERIC_MPN = {"doesnotapply", "na", "n/a", "none", "unbranded", "notapplicable", "unknown", "doesntapply", "-"}
+# 型番に見えるが商品を特定しない語（鋼材・電圧・電池の規格など）
+NOT_A_MODEL = re.compile(r"^(\d+v|vg\d+|aus\d+|sus\d+|sk\d|hrc\d+|\d+k|\d+w|\d+ml|\d+mm|cr\d+|lr\d+|\d+mah)$", re.I)
+BRANDS = {  # eBay のブランド名 → 日本の出品での書かれ方
+    "nikon": ["ニコン"], "canon": ["キヤノン", "キャノン"], "casio": ["カシオ"], "seiko": ["セイコー"],
+    "citizen": ["シチズン"], "pentax": ["ペンタックス"], "olympus": ["オリンパス"], "ricoh": ["リコー"],
+    "mamiya": ["マミヤ"], "konica": ["コニカ"], "minolta": ["ミノルタ"], "fujifilm": ["フジフイルム", "富士フイルム"],
+    "fuji": ["フジ"], "contax": ["コンタックス"], "yashica": ["ヤシカ"], "nintendo": ["任天堂", "ニンテンドウ", "ニンテンドー"],
+    "sega": ["セガ"], "sony": ["ソニー"], "snk": ["ネオジオ"], "nec": ["ＮＥＣ"], "bandai": ["バンダイ"],
+    "pokemon": ["ポケモン"], "issey miyake": ["イッセイミヤケ", "イッセイ ミヤケ"], "porter": ["ポーター", "吉田カバン"],
+    "kapital": ["キャピタル"], "tojiro": ["藤次郎", "藤寅"], "sakai takayuki": ["堺孝行"], "shun": ["旬"],
+}
 MODEL_RE = re.compile(r"(?<![A-Za-z0-9])(?=[A-Za-z0-9-]*\d)(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*")
 NOT_MODEL_RE = re.compile(r"^(\d+(mm|cm|ml|g|kg|s|th|st|nd|rd|pcs?|x)|f\d.*|s/?n.*|no\d+|exc\d*|\d+x\d+)$", re.I)
 
@@ -288,10 +299,26 @@ def model_of(title, detail):
         v = (v or "").split(",")[0].strip()
         if " " in v:  # 「Nikon FM2」のようにブランド込みなら、数字を含む部分だけにする
             v = next((w for w in v.split() if re.search(r"\d", w)), v)
-        if v and norm(v) not in GENERIC_MPN and re.search(r"\d", v) and re.search(r"[A-Za-z]", v) and len(v) <= 30:
+        if (v and norm(v) not in GENERIC_MPN and not NOT_A_MODEL.match(v.replace("-", ""))
+                and re.search(r"\d", v) and re.search(r"[A-Za-z]", v) and len(v) <= 30):
             return v
-    tokens = [t for t in MODEL_RE.findall(title or "") if len(norm(t)) >= 4 and not NOT_MODEL_RE.match(t)]
+    tokens = [t for t in MODEL_RE.findall(title or "")
+              if len(norm(t)) >= 4 and not NOT_MODEL_RE.match(t) and not NOT_A_MODEL.match(t.replace("-", ""))]
     return max(tokens, key=lambda t: len(norm(t))) if tokens else None
+
+
+def brand_of(detail):
+    aspects = {a.get("name", "").lower(): a.get("value", "") for a in (detail or {}).get("localizedAspects") or []}
+    b = ((detail or {}).get("brand") or aspects.get("brand") or "").strip()
+    return b if b and norm(b) not in GENERIC_MPN else None
+
+
+def brand_ok(title, brand):
+    """日本の出品タイトルに、そのブランドが（英語でもカタカナでも）入っているか。"""
+    if not brand:
+        return True
+    names = [brand] + BRANDS.get(brand.lower(), [])
+    return any(norm(n) in norm(title) for n in names)
 
 
 def color_of(detail):
@@ -513,6 +540,16 @@ class Etsy:
                 return None
             raise
 
+    def shop(self, shop_id):
+        """ショップの累計販売数（Etsy が公開している、そのショップがこれまでに売った数）。"""
+        try:
+            r = self._get(f"/shops/{shop_id}")
+        except ApiError as e:
+            log(f"    Etsy ショップ {shop_id} 失敗: {e}")
+            return None
+        return {"name": r.get("shop_name"), "sold": r.get("transaction_sold_count"),
+                "url": r.get("url"), "since": r.get("create_date") or r.get("created_timestamp")}
+
 
 def etsy_listing(r, fx):
     price = r.get("price") or {}
@@ -525,7 +562,8 @@ def etsy_listing(r, fx):
     elif currency != "USD":
         return None
     return {"id": str(r["listing_id"]), "t": html.unescape(r.get("title", "")), "p": round(amount, 2),
-            "qty": r.get("quantity"), "fav": r.get("num_favorers") or 0, "u": r.get("url")}
+            "qty": r.get("quantity"), "fav": r.get("num_favorers") or 0, "u": r.get("url"),
+            "shop_id": r.get("shop_id"), "created": r.get("original_creation_timestamp")}
 
 
 # ---------------------------------------------------------------- 売れた出品と日本の同じ品物
@@ -541,16 +579,22 @@ def has_model(title, model):
     return re.search(pat, loose) is not None
 
 
-def find_same_in_japan(ctx, c, exclude):
-    """売れた eBay 出品 c と同じ型番（と色）の、日本でいちばん安い出品。"""
+def find_same_in_japan(ctx, c, must_ja, exclude, q_ja):
+    """売れた eBay 出品 c と同じ品物の、日本でいちばん安い出品。
+
+    同じ型番であることに加えて、ブランド名と、その商品に必ず入る語（牛刀・本体など）も
+    タイトルに入っていることを求める。型番だけだと、鋼材名や電圧が同じだけの別商品に当たるため。
+    """
     floor = round(c["p"] * ctx["fx"] * ctx["settings"].get("jp_floor_ratio", 0.2))
     cache = ctx["state"].setdefault("jpmatch", {})
-    key = f"{norm(c['k'])}|{c.get('c') or ''}|{floor // 1000}"
+    key = f"{norm(c['k'])}|{c.get('c') or ''}|{c.get('b') or ''}|{norm(''.join(must_ja))}|{floor // 1000}"
     if key in cache and cache[key]["d"] >= days_ago(ctx["today"], 1):
         return cache[key]["jp"]
 
     colors = COLORS.get(c.get("c") or "", [])
-    queries = [f"{c['k']} {colors[0]}", c["k"]] if colors else [c["k"]]
+    queries = [f"{q_ja} {c['k']}", c["k"]]
+    if colors:
+        queries.insert(1, f"{c['k']} {colors[0]}")
     best = None
     for q in queries:
         found = []
@@ -562,7 +606,8 @@ def find_same_in_japan(ctx, c, exclude):
             except ApiError as e:
                 log(f"      {name}「{q}」失敗: {e}")
         hits = [x for x in found if x["p"] >= floor and has_model(x["t"], c["k"])
-                and not other_color(x["t"], c.get("c")) and title_ok(x["t"], [], exclude)]
+                and brand_ok(x["t"], c.get("b")) and title_ok(x["t"], must_ja, exclude)
+                and not other_color(x["t"], c.get("c"))]
         if hits:
             x = min(hits, key=lambda h: h["p"])
             best = {k: x.get(k) for k in ("t", "p", "u", "src", "shop")} | {"n": len(hits), "q": q}
@@ -571,11 +616,13 @@ def find_same_in_japan(ctx, c, exclude):
     return best
 
 
-def pair_with_japan(ctx, tracked, pid, exclude):
+def pair_with_japan(ctx, tracked, pid, must_ja, exclude, q_ja):
     """今日売れている出品と、この1週間に終わった出品のうち、型番がわかるものを日本と組み合わせる。"""
-    cands = [{"t": x["t"], "p": x["p"], "s": x["s"], "u": x["u"], "i": x.get("i"), "k": x["k"], "c": x.get("c"), "kind": "sold"}
+    cands = [{"t": x["t"], "p": x["p"], "s": x["s"], "u": x["u"], "i": x.get("i"), "k": x["k"], "c": x.get("c"),
+              "b": x.get("b"), "kind": "sold"}
              for x in tracked if x.get("s", 0) > 0 and x.get("k")]
-    cands += [{"t": e.get("t", ""), "p": e["pr"], "s": 1, "u": e.get("u"), "i": None, "k": e["k"], "c": e.get("c"), "kind": "ended"}
+    cands += [{"t": e.get("t", ""), "p": e["pr"], "s": 1, "u": e.get("u"), "i": None, "k": e["k"], "c": e.get("c"),
+               "b": e.get("b"), "kind": "ended"}
               for e in ctx["tracker"].items.values()
               if e.get("p") == pid and e.get("gone") and e.get("k") and e.get("pr")]
     cands.sort(key=lambda c: (-c["s"], c["kind"] != "sold"))
@@ -585,7 +632,7 @@ def pair_with_japan(ctx, tracked, pid, exclude):
         if key in seen:
             continue
         seen.add(key)
-        c["jp"] = find_same_in_japan(ctx, c, exclude)
+        c["jp"] = find_same_in_japan(ctx, c, must_ja, exclude, q_ja)
         pairs.append(c)
         if len(pairs) >= MAX_PAIRS:
             break
@@ -622,8 +669,8 @@ def process_product(p, genre, ctx):
             d = details.get(x["id"])
             if isinstance(d, dict):
                 x["s"] = sold_quantity(d)
-                x["k"], x["c"] = model_of(x["t"], d), color_of(d)
-                ident = {"t": x["t"][:90], "u": x["u"], "k": x["k"], "c": x["c"]}
+                x["k"], x["c"], x["b"] = model_of(x["t"], d), color_of(d), brand_of(d)
+                ident = {"t": x["t"][:90], "u": x["u"], "k": x["k"], "c": x["c"], "b": x["b"]}
                 tracker.observe(x["id"], x["s"], p["g"], p["id"], price=x["p"], seller=x.get("sl"), ident=ident)
         rechecked = recheck(ebay, tracker, lambda e: e.get("p") == p["id"], p["g"], p["id"])
 
@@ -657,7 +704,7 @@ def process_product(p, genre, ctx):
 
         # 売れた出品と同じ型番・色の品物を日本で探して、1組ずつ比べる
         if ctx["rakuten"] or ctx["yahoo"]:
-            out["pairs"] = pair_with_japan(ctx, tracked, p["id"], exclude_ja)
+            out["pairs"] = pair_with_japan(ctx, tracked, p["id"], must_ja, exclude_ja, p["q_ja"])
             matched = [x for x in out["pairs"] if x["jp"]]
             out["match"] = {"n": len(matched), "sell": median([x["p"] for x in matched]),
                             "buy": median([x["jp"]["p"] for x in matched])} if matched else None
@@ -770,9 +817,9 @@ def process_etsy_discovery(genre, ctx):
     for lid, x in found.items():
         e = items.get(lid)
         if e is None:
-            e = items[lid] = {"g": gid, "qty": x["qty"], "pqty": None, "d": today}
+            e = items[lid] = {"g": gid, "qty": x["qty"], "pqty": None, "d": today, "fav0": x["fav"], "since": today}
         roll(e)
-        e["qty"], e["seen"] = x["qty"], today
+        e["qty"], e["seen"], e["fav"] = x["qty"], today, x["fav"]
         for k in ("end", "ended"):
             e.pop(k, None)
 
@@ -780,7 +827,7 @@ def process_etsy_discovery(genre, ctx):
     since = days_ago(today, RECHECK_DAYS)
     missing = [lid for lid, e in items.items()
                if e["g"] == gid and e.get("seen") != today and "end" not in e and e.get("seen", "") >= since]
-    for lid in missing[:60]:
+    for lid in missing[:120]:
         e = items[lid]
         try:
             r = etsy.listing(lid)
@@ -805,15 +852,34 @@ def process_etsy_discovery(genre, ctx):
 
     results = []
     for lid, x in found.items():
-        results.append({k: x[k] for k in ("t", "p", "qty", "fav", "u", "q")} | {"s1": sold_delta(items[lid])})
-    results.sort(key=lambda x: (-x["s1"], -x["fav"], x["p"]))
+        e = items[lid]
+        days = (date.fromisoformat(today) - date.fromisoformat(e.get("since", today))).days
+        results.append({k: x[k] for k in ("t", "p", "qty", "fav", "u", "q")}
+                       | {"s1": sold_delta(e), "favup": x["fav"] - e.get("fav0", x["fav"]), "days": days,
+                          "shop_id": x.get("shop_id")})
+    results.sort(key=lambda x: (-x["s1"], -x["favup"], -x["fav"], x["p"]))
+    results = results[:DISCOVERY_TOP]
+
+    # 上位の出品について、そのショップの累計販売数を足す（Etsy が公開している数字。1週間ごとに取り直す）
+    shops = ctx["state"].setdefault("etsy_shops", {})
+    for x in results:
+        sid = str(x.pop("shop_id", "") or "")
+        if not sid:
+            continue
+        cached = shops.get(sid)
+        if not cached or cached["d"] < days_ago(today, 7):
+            info = etsy.shop(sid)
+            if info:
+                shops[sid] = cached = {"d": today, **info}
+        if cached:
+            x["shop"] = {"name": cached.get("name"), "sold": cached.get("sold"), "url": cached.get("url")}
 
     mine = [e for e in items.values() if e["g"] == gid and e["d"] == today]
     summary = {"es1": sum(sold_delta(e) for e in mine),
                "ev1": sum(1 for e in mine if e.get("ended") == today and e.get("end") == "gone"),
                "en": len(found)}
-    log(f"    Etsy 売れ筋 {len(found)}件 / 在庫減 {summary['es1']} / 終了 {summary['ev1']}")
-    return results[:DISCOVERY_TOP], summary
+    log(f"    Etsy 売れ筋 {len(found)}件 / 売れた {summary['es1']} / 終了 {summary['ev1']}")
+    return results, summary
 
 
 def prune_etsy(state, today):

@@ -500,7 +500,9 @@ function renderHot() {
       ${thumb(null, x.t)}
       <div>
         <div class="title">${esc(x.t)}</div>
-        <div class="nums"><b>${usd(x.p)}</b>（${yen(x.p * fx)}）· お気に入り <b>${x.fav}</b>${x.qty != null ? ` · 在庫 ${x.qty}` : ''}${x.s1 ? ` · 昨日 <b>${x.s1}個</b>売れた` : ''}</div>
+        <div class="nums"><b>${usd(x.p)}</b>（${yen(x.p * fx)}）${x.s1 ? ` · 昨日 <b>${x.s1}個</b>売れた` : ''}${x.qty != null ? ` · 在庫 ${x.qty}` : ''}</div>
+        <div class="nums">お気に入り <b>${x.fav}</b>${x.favup > 0 && x.days ? `（${x.days}日で +${x.favup}）` : ''}${
+          x.shop?.sold != null ? ` · このショップの累計販売 <b>${x.shop.sold.toLocaleString('ja-JP')}</b>件` : ''}</div>
       </div>
       ${linkRow('日本で探す', buyLinks(jaQuery(x.t)))}
       ${priceRow(x, 'Etsy')}
@@ -516,7 +518,10 @@ function renderHot() {
     const data = src === 'etsy' ? app.data.etsy_discovery : app.data.discovery;
     body = genres.map((g) => {
       const list = data?.[g.id] || [];
-      const head = `<div class="section-title">${esc(g.name)}</div>`;
+      const rows = (app.history?.genres?.[g.id] || []).slice(-30);
+      const sold30 = rows.reduce((a, r) => a + (src === 'etsy' ? (r.es1 || 0) : (r.s1 || 0)), 0);
+      const ended30 = rows.reduce((a, r) => a + (src === 'etsy' ? (r.ev1 || 0) : (r.v1 || 0)), 0);
+      const head = `<div class="section-title">${esc(g.name)}<span class="section-sub">追跡中の出品から、30日で売れた ${sold30}個 · 終了 ${ended30}件</span></div>`;
       if (!list.length) return `${head}<div class="note">まだ見つかっていません。</div>`;
       return `${head}<div class="list">${list.map(src === 'etsy' ? etsyCard : ebayCard).join('')}</div>`;
     }).join('');

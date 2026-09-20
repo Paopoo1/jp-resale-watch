@@ -52,6 +52,7 @@
     { "id": "hagi-chawan", "g": "craft", "name": "萩焼 茶碗", "q_en": "Hagi ware tea bowl", "q_ja": "萩焼 茶碗", "must_en": ["hagi"], "must_ja": ["萩", "茶碗"], "cond": "any", "min_usd": 30, "min_jpy": 2000 },
     { "id": "bizen-vase", "g": "craft", "name": "備前焼 花入", "q_en": "Bizen ware vase", "q_ja": "備前焼 花入", "must_en": ["bizen"], "must_ja": ["備前"], "cond": "any", "min_usd": 40, "min_jpy": 3000 },
     { "id": "kutani-plate", "g": "craft", "name": "九谷焼 皿", "q_en": "Kutani plate", "q_ja": "九谷焼 皿", "must_en": ["kutani"], "must_ja": ["九谷"], "cond": "any", "min_usd": 30, "min_jpy": 2000 },
+    { "id": "kokeshi", "g": "craft", "name": "こけし", "q_en": "kokeshi doll", "q_ja": "こけし", "must_en": ["kokeshi"], "must_ja": ["こけし"], "exclude": ["キーホルダー", "ガチャ", "マスコット", "ストラップ"], "cond": "any", "min_usd": 25, "min_jpy": 2000 },
     { "id": "sakai-takayuki-gyuto", "g": "craft", "name": "堺孝行 牛刀", "q_en": "Sakai Takayuki gyuto", "q_ja": "堺孝行 牛刀", "must_en": ["sakai takayuki", "gyuto"], "must_ja": ["牛刀"], "cond": "new", "min_usd": 60, "min_jpy": 6000 },
     { "id": "tojiro-dp-gyuto", "g": "craft", "name": "藤次郎 DP 牛刀", "q_en": "Tojiro DP gyuto", "q_ja": "藤次郎 DP 牛刀", "must_en": ["tojiro", "gyuto"], "must_ja": ["牛刀"], "cond": "new", "min_usd": 50, "min_jpy": 5000 },
 
