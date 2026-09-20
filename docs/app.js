@@ -82,7 +82,7 @@ function mergeSettings(defaults) {
 
 function saveSettings() {
   const d = app.data.settings, s = app.settings, diff = {};
-  for (const k of ['fee_rate', 'fixed_fee_usd', 'fx_loss_rate', 'other_cost_rate', 'domestic_ship_jpy']) {
+  for (const k of ['fee_rate', 'etsy_fee_rate', 'fixed_fee_usd', 'fx_loss_rate', 'other_cost_rate', 'domestic_ship_jpy']) {
     if (s[k] !== d[k]) diff[k] = s[k];
   }
   const ship = Object.fromEntries(Object.entries(s.ship_jpy).filter(([g, v]) => v !== d.ship_jpy[g]));
@@ -137,11 +137,13 @@ function calc(p) {
   return r;
 }
 
-/** eBay の売値(USD)と日本の仕入れ値(円)から、1個売ったときの利益を出す。 */
-function calcCore(sell, buy, genre) {
+/** 売値(USD)と日本の仕入れ値(円)から、1個売ったときの利益を出す。site で手数料が変わる。 */
+function calcCore(sell, buy, genre, site = 'ebay') {
   const S = app.settings, fx = fxRate();
   if (sell == null) return null;
-  const fee = sell * S.fee_rate + S.fixed_fee_usd;
+  const rate = site === 'etsy' ? (S.etsy_fee_rate ?? 0.13) : S.fee_rate;
+  const fixed = site === 'etsy' ? 0.2 : S.fixed_fee_usd;
+  const fee = sell * rate + fixed;
   const other = sell * S.other_cost_rate;
   const net = sell - fee - other;
   const r = {
@@ -754,6 +756,7 @@ function renderSettings() {
       <p class="panel-sub">この端末だけに保存されます。変えるとすぐ全商品の利益に反映されます。</p>
       ${field('fee_rate', 'eBay 手数料', '落札手数料＋海外手数料の合計の目安', r2(S.fee_rate), '%')}
       ${field('fixed_fee_usd', '1件ごとの固定手数料', '', S.fixed_fee_usd, '$')}
+      ${field('etsy_fee_rate', 'Etsy 手数料', '出品料・決済手数料の合計の目安', r2(S.etsy_fee_rate ?? 0.13), '%')}
       ${field('fx_loss_rate', '為替手数料', '売上を円に替えるときの目減り', r2(S.fx_loss_rate), '%')}
       ${field('other_cost_rate', '関税・その他の負担', '売値に対する割合', r2(S.other_cost_rate), '%')}
       ${field('domestic_ship_jpy', '仕入れの国内送料', '', S.domestic_ship_jpy, '円', 1)}
@@ -807,7 +810,7 @@ function onSettingInput(e) {
   const id = e.target.id, raw = e.target.value.trim(), v = raw === '' ? null : Number(raw);
   if (raw !== '' && !Number.isFinite(v)) return;
   const S = app.settings, D = app.data.settings;
-  const pctKeys = ['fee_rate', 'fx_loss_rate', 'other_cost_rate'];
+  const pctKeys = ['fee_rate', 'etsy_fee_rate', 'fx_loss_rate', 'other_cost_rate'];
   if (pctKeys.includes(id)) S[id] = v == null ? D[id] : v / 100;
   else if (id === 'fixed_fee_usd' || id === 'domestic_ship_jpy') S[id] = v ?? D[id];
   else if (id.startsWith('ship_')) S.ship_jpy[id.slice(5)] = v ?? D.ship_jpy[id.slice(5)];
@@ -848,6 +851,25 @@ function pairsPanel(p) {
   }).join('');
   return `<section class="panel"><h3>同じ型番で比べた組み合わせ</h3>
     <p class="panel-sub">eBay で売れた出品と、日本で同じ型番・色のいちばん安い出品を1組ずつ比べています</p>${rows}</section>`;
+}
+
+/** Etsy（日本のショップ）の相場と、Etsy で売った場合の利益。 */
+function etsyPanel(p, c) {
+  const e = p.etsy;
+  if (!e || !e.n) return '';
+  const buy = c?.buy ?? null;
+  const r = e.med != null ? calcCore(e.med, buy, p.g, 'etsy') : null;
+  const diff = r && c?.profit != null ? r.profit - c.profit : null;
+  return `<section class="panel">
+    <h3>Etsy（日本のショップ）</h3>
+    <p class="panel-sub">Etsy は手作り・ビンテージ（20年以上）・手芸材料のみ。新品のお菓子などは出せません</p>
+    <ul class="status-list">
+      <li><span>出品数</span><span>${e.n}件</span></li>
+      <li><span>価格の中央値</span><span>${usd(e.med)}（${yen((e.med ?? 0) * fxRate())}）</span></li>
+      <li><span>昨日消えた出品</span><span>${e.v1}件</span></li>
+      ${r?.profit != null ? `<li><span>Etsy で売った場合の利益<small class="hint-inline">手数料 ${Math.round((app.settings.etsy_fee_rate ?? 0.13) * 100)}%・同じ仕入れ値で計算</small></span><span class="${r.profit > 0 ? 'pos' : 'neg'}">${signedYen(r.profit)}${diff ? `（eBay より ${signedYen(diff)}）` : ''}</span></li>` : ''}
+    </ul>
+  </section>`;
 }
 
 function liquidityPanel(p) {
@@ -946,7 +968,7 @@ function openDetail(id) {
 
       ${topRows ? `<section class="panel"><h3>eBay でよく売れている出品</h3><div class="rows">${topRows}</div></section>` : ''}
       ${jpRows ? `<section class="panel"><h3>日本の安い出品</h3><div class="rows">${jpRows}</div></section>` : ''}
-      ${p.etsy ? `<section class="panel"><h3>Etsy（日本のショップ）</h3><ul class="status-list"><li><span>出品数</span><span>${p.etsy.n}件</span></li><li><span>価格の中央値</span><span>${usd(p.etsy.med)}</span></li><li><span>昨日消えた出品</span><span>${p.etsy.v1}件</span></li></ul></section>` : ''}
+      ${etsyPanel(p, c)}
 
       <section class="panel">
         <h3>日本で買える出品</h3>

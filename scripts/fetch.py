@@ -592,7 +592,7 @@ def find_same_in_japan(ctx, c, must_ja, exclude, q_ja):
     同じ型番であることに加えて、ブランド名と、その商品に必ず入る語（牛刀・本体など）も
     タイトルに入っていることを求める。型番だけだと、鋼材名や電圧が同じだけの別商品に当たるため。
     """
-    floor = round(c["p"] * ctx["fx"] * ctx["settings"].get("jp_floor_ratio", 0.2))
+    floor = round(c["p"] * ctx["fx"] * ctx["floor_ratio"])
     cache = ctx["state"].setdefault("jpmatch", {})
     key = f"{norm(c['k'])}|{c.get('c') or ''}|{c.get('b') or ''}|{norm(''.join(must_ja))}|{floor // 1000}"
     if key in cache and cache[key]["d"] >= days_ago(ctx["today"], 1):
@@ -656,6 +656,9 @@ def prune_jpmatch(state, today):
 
 def process_product(p, genre, ctx):
     ebay, tracker, fx = ctx["ebay"], ctx["tracker"], ctx["fx"]
+    # 「eBay 売値のこの割合より安いものは別の品物」という下限。
+    # 安いみやげ物は日本での値段が売値の1割ということもあるので、ジャンルごとに変えられる
+    ctx["floor_ratio"] = p.get("jp_floor_ratio", genre.get("jp_floor_ratio", ctx["settings"].get("jp_floor_ratio", 0.3)))
     must_en = p.get("must", []) + p.get("must_en", [])
     must_ja = p.get("must", []) + p.get("must_ja", [])
     exclude_en = genre.get("exclude_en", []) + p.get("exclude", [])
@@ -724,7 +727,7 @@ def process_product(p, genre, ctx):
     # eBay の売値の一定割合より安いものは、ケースや付属品など別の品物とみなして探さない
     floor = max(min_jpy, 1)
     if out["ebay"] and out["ebay"]["sell"]:
-        floor = max(floor, round(out["ebay"]["sell"] * fx * ctx["settings"].get("jp_floor_ratio", 0.2)))
+        floor = max(floor, round(out["ebay"]["sell"] * fx * ctx["floor_ratio"]))
     items = []
     for name, client in (("楽天", ctx["rakuten"]), ("Yahoo!", ctx["yahoo"])):
         if not client:
