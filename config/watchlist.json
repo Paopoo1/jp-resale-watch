@@ -9,7 +9,7 @@
     "domestic_ship_jpy": 800,
     "fx_fallback": 150,
     "ship_jpy": { "camera": 3500, "craft": 4500, "hobby": 3000, "fashion": 2500 },
-    "jp_floor_ratio": 0.2
+    "jp_floor_ratio": 0.3
   },
 
   "genres": [

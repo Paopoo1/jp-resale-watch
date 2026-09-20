@@ -579,6 +579,13 @@ def has_model(title, model):
     return re.search(pat, loose) is not None
 
 
+def many_models(title):
+    """型番を3つ以上並べた出品（対応機種リストの付属品など）は、同じ品物ではない。"""
+    tokens = {norm(t) for t in MODEL_RE.findall(title or "")
+              if len(norm(t)) >= 4 and not NOT_A_MODEL.match(t.replace("-", ""))}
+    return len(tokens) >= 3
+
+
 def find_same_in_japan(ctx, c, must_ja, exclude, q_ja):
     """売れた eBay 出品 c と同じ品物の、日本でいちばん安い出品。
 
@@ -607,7 +614,7 @@ def find_same_in_japan(ctx, c, must_ja, exclude, q_ja):
                 log(f"      {name}「{q}」失敗: {e}")
         hits = [x for x in found if x["p"] >= floor and has_model(x["t"], c["k"])
                 and brand_ok(x["t"], c.get("b")) and title_ok(x["t"], must_ja, exclude)
-                and not other_color(x["t"], c.get("c"))]
+                and not other_color(x["t"], c.get("c")) and not many_models(x["t"])]
         if hits:
             x = min(hits, key=lambda h: h["p"])
             best = {k: x.get(k) for k in ("t", "p", "u", "src", "shop")} | {"n": len(hits), "q": q}
